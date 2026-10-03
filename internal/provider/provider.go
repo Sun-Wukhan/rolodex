@@ -28,3 +28,12 @@ type IdentityProvider interface {
 	Name() string
 	Lookup(ctx context.Context, q domain.IdentityQuery) (*domain.Identity, error)
 }
+
+// NormalizePhoneOrRaw normalises a vendor phone to E.164 so it can be compared
+// with local data, falling back to the raw value if it cannot be parsed.
+func NormalizePhoneOrRaw(raw string) string {
+	if p, err := domain.NormalizePhone(raw); err == nil {
+		return p
+	}
+	return raw
+}
