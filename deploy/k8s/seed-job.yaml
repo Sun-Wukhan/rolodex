@@ -1,0 +1,46 @@
+# Idempotent: existing usernames are skipped, so re-applying is safe. Retries
+# (backoffLimit) cover the window where Postgres is still starting.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed
+  labels: { app.kubernetes.io/name: seed }
+spec:
+  backoffLimit: 10
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: seed }
+    spec:
+      restartPolicy: OnFailure
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: seed
+          image: rolodex:local
+          imagePullPolicy: Never
+          command: ["/usr/local/bin/seed"]
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: POSTGRES_PASSWORD } }
+            - name: POSTGRES_DB
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: POSTGRES_DB } }
+            - name: DB_DRIVER
+              value: postgres
+            - name: DATABASE_URL
+              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable
+            - name: SEED_PASSWORD
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: SEED_PASSWORD } }
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { memory: 256Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }

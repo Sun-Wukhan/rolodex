@@ -1,0 +1,17 @@
+# Local Kubernetes (minikube) deployment of the full stack.
+# The rolodex-env Secret is created from the git-ignored .env by `make k8s-up`,
+# so no credentials live in these manifests.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: rolodex
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: rolodex
+    includeSelectors: false
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - mockvendors.yaml
+  - seed-job.yaml
+  - api.yaml
+  - web.yaml
