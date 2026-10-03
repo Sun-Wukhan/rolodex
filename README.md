@@ -144,6 +144,36 @@ api/openapi.yaml  API contract
 Errors always use one envelope:
 `{"error":{"code":"invalid_input","message":"...","fields":{...},"request_id":"..."}}`.
 
+## Frontend
+
+`web/` is a deliberately thin React 19 + TypeScript + Vite client. The time budget went
+into the backend, but the UI demonstrates the API contract end to end.
+
+```
+web/src/
+  api/          typed API client (client.ts), wire types, error description
+  auth/         in-memory session context, provider, route guard
+  components/   reusable styled-components primitives: Button, TextField, Card,
+                Badge, Alert, Spinner, Layout, EnrichmentResults
+  pages/        login, search, profile + enrichment, add user
+  styles/       theme tokens (typed DefaultTheme) and global styles
+```
+
+- **Reusable primitives:** components consume theme tokens only, use transient
+  `$props` so styling props never reach the DOM, and share semantic `Tone`s
+  (`success`, `warning`, `danger`, `info`, `neutral`) between badges and alerts.
+- **Session:** the JWT is held in the API client's closure, never in `localStorage`,
+  limiting XSS exposure. A 401 or token expiry signs the user out.
+- **PII hygiene:** search terms are kept in memory, not in the URL, so names and phone
+  numbers stay out of browser history and server logs; cached results are cleared on
+  sign-out. `Referrer-Policy: no-referrer` and a CSP are set by nginx.
+- **Errors:** the API's field errors map onto form fields; other errors show the
+  `request_id` so a support ticket can be traced to a log line.
+- **Accessibility:** labelled inputs with `aria-describedby` errors, `role="alert"`
+  messages, `aria-pressed` on toggle buttons and visible focus rings.
+- **Tests:** Vitest + Testing Library cover the API client, every component and page,
+  and the full auth flow (login, 401 auto-logout, sign-out); coverage is ~97%.
+
 ## Database design
 
 ```
