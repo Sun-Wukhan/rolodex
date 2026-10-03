@@ -75,6 +75,15 @@ describe('LoginPage', () => {
     renderWithProviders(<LoginPage />, { route: '/login', path: '/login' });
     expect(screen.getByText('navigated')).toBeInTheDocument();
   });
+
+  it('explains how to sign in when running the static demo', () => {
+    renderWithProviders(<LoginPage />, {
+      auth: { session: null, demo: true },
+      route: '/login',
+      path: '/login',
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('Demo mode');
+  });
 });
 
 describe('SearchPage', () => {

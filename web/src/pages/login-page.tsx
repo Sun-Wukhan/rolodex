@@ -35,7 +35,7 @@ const Form = styled.form`
 
 /** Username/password sign-in screen. */
 export function LoginPage() {
-  const { session, login } = useAuth();
+  const { session, login, demo } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [username, setUsername] = useState('');
@@ -67,6 +67,13 @@ export function LoginPage() {
         <Title>Sign in to Rolodex</Title>
         <Muted>Search profiles and verify identities with ABC and XYC.</Muted>
         <Form onSubmit={onSubmit} noValidate>
+          {demo && (
+            <Alert tone="info">
+              Demo mode: data lives in your browser. Sign in as <strong>admin</strong>,{' '}
+              <strong>ada</strong>, <strong>grace</strong>, <strong>alan</strong> or{' '}
+              <strong>katherine</strong> with any password of 12+ characters.
+            </Alert>
+          )}
           {error && <Alert requestId={error.requestId}>{error.message}</Alert>}
           <TextField
             label="Username"

@@ -10,6 +10,8 @@ export interface Session {
 export interface AuthContextValue {
   session: Session | null;
   api: ApiClient;
+  /** True when the UI is backed by the in-browser demo API (static hosting). */
+  demo: boolean;
   login(username: string, password: string): Promise<void>;
   logout(): void;
 }
