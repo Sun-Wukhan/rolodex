@@ -36,6 +36,7 @@ export function renderWithProviders(
   const value: AuthContextValue = {
     session: { token: 't', username: 'admin', expiresAt: new Date(Date.now() + 60_000) },
     api: mockApi(),
+    demo: false,
     login: vi.fn(),
     logout: vi.fn(),
     ...auth,

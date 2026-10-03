@@ -1,0 +1,64 @@
+name: Pages demo
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build static demo
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Build with the in-browser demo API
+        env:
+          VITE_DEMO_MODE: "true"
+          VITE_BASE_PATH: /${{ github.event.repository.name }}/
+        run: npm run build
+
+      # GitHub Pages has no SPA rewrites; serving index.html as 404.html lets
+      # deep links such as /users/<id> boot the client-side router.
+      - name: SPA fallback
+        run: cp dist/index.html dist/404.html
+
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
