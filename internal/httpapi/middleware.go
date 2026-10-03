@@ -61,6 +61,8 @@ func securityHeaders(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cache-Control", "no-store")
 		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+		// CORP only governs no-cors embedding, so the web app's CORS fetches are unaffected.
+		h.Set("Cross-Origin-Resource-Policy", "same-origin")
 		next.ServeHTTP(w, r)
 	})
 }

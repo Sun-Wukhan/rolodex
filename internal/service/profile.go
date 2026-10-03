@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -94,6 +95,9 @@ func (s *ProfileService) GetUser(ctx context.Context, id uuid.UUID) (*UserDetail
 // Search finds profiles by name, phone and/or username. At least one filter is
 // required to prevent unbounded enumeration of PII.
 func (s *ProfileService) Search(ctx context.Context, q domain.SearchQuery) ([]domain.Profile, error) {
+	if !isPlainText(q.Name) || !isPlainText(q.Username) || !isPlainText(q.Phone) {
+		return nil, &ValidationError{Fields: map[string]string{"query": "search term contains invalid characters"}}
+	}
 	q.Name = strings.TrimSpace(q.Name)
 	q.Username = strings.ToLower(strings.TrimSpace(q.Username))
 	q.Phone = strings.TrimSpace(q.Phone)
@@ -120,6 +124,8 @@ func validateCreate(in CreateUserInput) (domain.Profile, string, error) {
 	name := strings.TrimSpace(in.Name)
 	if name == "" || utf8.RuneCountInString(name) > maxNameLen {
 		errs["name"] = "required, at most 200 characters"
+	} else if !isPlainText(name) {
+		errs["name"] = "contains invalid characters"
 	}
 	phone, err := domain.NormalizePhone(in.Phone)
 	if err != nil {
@@ -146,6 +152,8 @@ func validateCreate(in CreateUserInput) (domain.Profile, string, error) {
 	} {
 		if utf8.RuneCountInString(v) > maxFieldLen {
 			errs[field] = "at most 200 characters"
+		} else if !isPlainText(v) {
+			errs[field] = "contains invalid characters"
 		}
 	}
 	if addr.Country != "" && !countryPattern.MatchString(addr.Country) {
@@ -156,4 +164,11 @@ func validateCreate(in CreateUserInput) (domain.Profile, string, error) {
 		return domain.Profile{}, "", &ValidationError{Fields: errs}
 	}
 	return domain.Profile{Name: name, Phone: phone, Address: addr}, username, nil
+}
+
+// isPlainText reports whether s is valid UTF-8 without control characters.
+// Datastores reject NUL bytes and invalid encodings with an internal error, so
+// such input must be refused as a validation failure before it reaches them.
+func isPlainText(s string) bool {
+	return utf8.ValidString(s) && strings.IndexFunc(s, unicode.IsControl) == -1
 }
