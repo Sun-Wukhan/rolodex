@@ -52,10 +52,11 @@ outside Docker.
 make up            # creates .env from .env.example, builds and starts everything
 ```
 
-| Service      | URL                    | Notes                                   |
-| ------------ | ---------------------- | --------------------------------------- |
-| API          | http://localhost:8080  | OpenAPI spec in `api/openapi.yaml`      |
-| Mock vendors | :9001 (ABC), :9002 (XYC) | XYC injects 503s to exercise retries |
+| Service      | URL                      | Notes                                 |
+| ------------ | ------------------------ | ------------------------------------- |
+| Web UI       | http://localhost:3000    | React app served by nginx             |
+| API          | http://localhost:8080    | OpenAPI spec in `api/openapi.yaml`    |
+| Mock vendors | :9001 (ABC), :9002 (XYC) | XYC injects 503s to exercise retries  |
 
 Seeded users: `admin`, `ada`, `grace`, `alan`, `katherine`, all with the
 `SEED_PASSWORD` from `.env`.
@@ -70,8 +71,13 @@ curl -s -X POST "localhost:8080/api/v1/users/<id>/enrich?provider=abc,xyc" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Without Docker (SQLite): `make env`, then `make run-mock`, `make seed-local` and
-`make run-api` in separate terminals.
+Without Docker (SQLite): `make env`, then `make run-mock`, `make seed-local`,
+`make run-api` and `make web` (http://localhost:5173) in separate terminals.
+
+Demo flow in the UI: sign in as `admin`, search by name for "a", open a profile and
+click **Check all**. Grace gets her missing street and postal code from ABC; Katherine
+is verified by both vendors except for ABC's stale street address; Alan is unknown to
+ABC but fully enriched by XYC.
 
 ## Architecture
 
@@ -137,6 +143,36 @@ api/openapi.yaml  API contract
 
 Errors always use one envelope:
 `{"error":{"code":"invalid_input","message":"...","fields":{...},"request_id":"..."}}`.
+
+## Frontend
+
+`web/` is a deliberately thin React 19 + TypeScript + Vite client. The time budget went
+into the backend, but the UI demonstrates the API contract end to end.
+
+```
+web/src/
+  api/          typed API client (client.ts), wire types, error description
+  auth/         in-memory session context, provider, route guard
+  components/   reusable styled-components primitives: Button, TextField, Card,
+                Badge, Alert, Spinner, Layout, EnrichmentResults
+  pages/        login, search, profile + enrichment, add user
+  styles/       theme tokens (typed DefaultTheme) and global styles
+```
+
+- **Reusable primitives:** components consume theme tokens only, use transient
+  `$props` so styling props never reach the DOM, and share semantic `Tone`s
+  (`success`, `warning`, `danger`, `info`, `neutral`) between badges and alerts.
+- **Session:** the JWT is held in the API client's closure, never in `localStorage`,
+  limiting XSS exposure. A 401 or token expiry signs the user out.
+- **PII hygiene:** search terms are kept in memory, not in the URL, so names and phone
+  numbers stay out of browser history and server logs; cached results are cleared on
+  sign-out. `Referrer-Policy: no-referrer` and a CSP are set by nginx.
+- **Errors:** the API's field errors map onto form fields; other errors show the
+  `request_id` so a support ticket can be traced to a log line.
+- **Accessibility:** labelled inputs with `aria-describedby` errors, `role="alert"`
+  messages, `aria-pressed` on toggle buttons and visible focus rings.
+- **Tests:** Vitest + Testing Library cover the API client, every component and page,
+  and the full auth flow (login, 401 auto-logout, sign-out); coverage is ~97%.
 
 ## Database design
 
