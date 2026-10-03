@@ -55,10 +55,21 @@ spec:
             limits: { memory: 512Mi }
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
+          # Besides PGDATA, postgres writes its socket/lock files and temp files.
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: { sizeLimit: 64Mi }
   volumeClaimTemplates:
     - metadata:
         name: data

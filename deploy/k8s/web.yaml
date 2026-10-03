@@ -42,4 +42,12 @@ spec:
             limits: { memory: 64Mi }
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
+          # nginx-unprivileged keeps its pid file and temp buffers under /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: { sizeLimit: 32Mi }
