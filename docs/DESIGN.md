@@ -157,8 +157,15 @@ flowchart LR
   CI -->|vite build| Pages[GitHub Pages: web]
 ```
 
+- The CI half of this pipeline exists today (`.github/workflows/ci.yml`): lint, tests on
+  SQLite and PostgreSQL with an 80% coverage gate, `govulncheck`, `npm audit`, and image
+  builds. Deployment would be a further job gated on `main` that pushes the image to
+  Artifact Registry and runs `gcloud run deploy`.
 - Cloud Run fits a stateless Go container that scales to zero; GitHub Actions
   authenticates with Workload Identity Federation (no long-lived keys).
+- Cloud Run sits behind Google's front end, so the API would set
+  `TRUSTED_PROXY_CIDRS` to the load balancer ranges; otherwise every request would
+  share the proxy's IP for rate limiting.
 - The SQLite implementation keeps local development and tests dependency-free.
 
 ## 8. Scaling considerations
