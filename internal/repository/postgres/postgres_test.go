@@ -5,9 +5,9 @@ import (
 	"os"
 	"testing"
 
-	"github.com/navid/rolodex/internal/repository"
-	"github.com/navid/rolodex/internal/repository/postgres"
-	"github.com/navid/rolodex/internal/repository/repositorytest"
+	"github.com/Sun-Wukhan/rolodex/internal/repository"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/postgres"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/repositorytest"
 )
 
 // TestPostgresContract runs only when TEST_DATABASE_URL points at a disposable

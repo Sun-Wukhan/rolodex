@@ -15,8 +15,8 @@ import (
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/migrations"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/migrations"
 )
 
 // Repository is a SQLite-backed UserRepository.

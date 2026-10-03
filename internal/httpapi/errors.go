@@ -8,8 +8,8 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/service"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/service"
 )
 
 // ErrorBody is the standard error envelope returned by every endpoint.

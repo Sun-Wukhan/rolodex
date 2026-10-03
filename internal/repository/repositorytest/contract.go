@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/repository"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/repository"
 )
 
 // Factory returns a fresh, empty repository for a single test.

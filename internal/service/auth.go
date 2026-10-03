@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/repository"
-	"github.com/navid/rolodex/internal/security"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/repository"
+	"github.com/Sun-Wukhan/rolodex/internal/security"
 )
 
 // TokenIssuer issues signed access tokens.

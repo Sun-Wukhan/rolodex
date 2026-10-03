@@ -6,9 +6,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/navid/rolodex/internal/repository"
-	"github.com/navid/rolodex/internal/repository/postgres"
-	"github.com/navid/rolodex/internal/repository/sqlite"
+	"github.com/Sun-Wukhan/rolodex/internal/repository"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/postgres"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/sqlite"
 )
 
 // Supported drivers.

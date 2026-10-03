@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/navid/rolodex/internal/repository"
-	"github.com/navid/rolodex/internal/repository/repositorytest"
-	"github.com/navid/rolodex/internal/repository/sqlite"
+	"github.com/Sun-Wukhan/rolodex/internal/repository"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/repositorytest"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/sqlite"
 )
 
 func TestSQLiteContract(t *testing.T) {

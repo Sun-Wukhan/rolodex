@@ -12,14 +12,14 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/navid/rolodex/internal/config"
-	"github.com/navid/rolodex/internal/httpapi"
-	"github.com/navid/rolodex/internal/provider"
-	"github.com/navid/rolodex/internal/provider/abc"
-	"github.com/navid/rolodex/internal/provider/xyc"
-	"github.com/navid/rolodex/internal/repository/factory"
-	"github.com/navid/rolodex/internal/security"
-	"github.com/navid/rolodex/internal/service"
+	"github.com/Sun-Wukhan/rolodex/internal/config"
+	"github.com/Sun-Wukhan/rolodex/internal/httpapi"
+	"github.com/Sun-Wukhan/rolodex/internal/provider"
+	"github.com/Sun-Wukhan/rolodex/internal/provider/abc"
+	"github.com/Sun-Wukhan/rolodex/internal/provider/xyc"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/factory"
+	"github.com/Sun-Wukhan/rolodex/internal/security"
+	"github.com/Sun-Wukhan/rolodex/internal/service"
 )
 
 func main() {

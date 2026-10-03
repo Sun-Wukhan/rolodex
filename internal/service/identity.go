@@ -12,9 +12,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/provider"
-	"github.com/navid/rolodex/internal/repository"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/provider"
+	"github.com/Sun-Wukhan/rolodex/internal/repository"
 )
 
 // IdentityService enriches local profiles with data from third-party identity

@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/provider"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/provider"
 )
 
 // Name is the provider identifier used in API requests and provenance.

@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/navid/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
 )
 
 // Normalised provider errors. Adapters must wrap vendor-specific failures in
