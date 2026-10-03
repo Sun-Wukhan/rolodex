@@ -1,7 +1,10 @@
 import react from '@vitejs/plugin-react';
+import { loadEnv } from 'vite';
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  // GitHub Pages serves project sites under /<repo>/; local and Docker builds use /.
+  base: loadEnv(mode, '.').VITE_BASE_PATH ?? '/',
   plugins: [react()],
   server: { port: 5173 },
   test: {
@@ -16,4 +19,4 @@ export default defineConfig({
       thresholds: { lines: 80, functions: 80, statements: 80, branches: 70 },
     },
   },
-});
+}));

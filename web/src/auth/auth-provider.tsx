@@ -4,6 +4,9 @@ import { AuthContext, type AuthContextValue, type Session } from './auth-context
 
 interface AuthProviderProps {
   baseUrl: string;
+  /** Overrides the transport; the static demo passes an in-browser API. */
+  fetchImpl?: typeof fetch;
+  demo?: boolean;
   children: ReactNode;
 }
 
@@ -11,10 +14,10 @@ interface AuthProviderProps {
  * Holds the session in memory only. Tokens are never written to localStorage,
  * which limits exposure to XSS at the cost of signing in again after a reload.
  */
-export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
+export function AuthProvider({ baseUrl, fetchImpl, demo = false, children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null);
   const [api] = useState(() =>
-    createApiClient({ baseUrl, onUnauthorized: () => setSession(null) }),
+    createApiClient({ baseUrl, fetchImpl, onUnauthorized: () => setSession(null) }),
   );
 
   const logout = useCallback(() => {
@@ -44,8 +47,8 @@ export function AuthProvider({ baseUrl, children }: AuthProviderProps) {
   }, [session, logout]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ session, api, login, logout }),
-    [session, api, login, logout],
+    () => ({ session, api, demo, login, logout }),
+    [session, api, demo, login, logout],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
