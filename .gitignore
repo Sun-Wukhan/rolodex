@@ -1,0 +1,22 @@
+# Go
+/bin/
+*.test
+*.out
+coverage.*
+*.db
+*.db-journal
+
+# Node
+node_modules/
+web/dist/
+web/coverage/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
