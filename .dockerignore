@@ -1,0 +1,8 @@
+.git
+web
+bin
+*.db
+*.db-*
+.env
+coverage.*
+docs

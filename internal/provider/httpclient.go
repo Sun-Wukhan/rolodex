@@ -31,7 +31,9 @@ type Credentials struct {
 }
 
 // String redacts the password if Credentials is ever formatted.
-func (c Credentials) String() string { return fmt.Sprintf("{Username:%s Password:REDACTED}", c.Username) }
+func (c Credentials) String() string {
+	return fmt.Sprintf("{Username:%s Password:REDACTED}", c.Username)
+}
 
 // RetryPolicy bounds retries for transient failures.
 type RetryPolicy struct {

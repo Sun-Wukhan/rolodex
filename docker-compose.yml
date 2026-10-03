@@ -1,0 +1,70 @@
+x-go-image: &go-image
+  build: .
+  image: rolodex:local
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  mockvendors:
+    <<: *go-image
+    entrypoint: ["/usr/local/bin/mockvendors"]
+    environment:
+      MOCK_ABC_USERNAME: ${ABC_USERNAME:?set in .env}
+      MOCK_ABC_PASSWORD: ${ABC_PASSWORD:?set in .env}
+      MOCK_XYC_USERNAME: ${XYC_USERNAME:?set in .env}
+      MOCK_XYC_PASSWORD: ${XYC_PASSWORD:?set in .env}
+      XYC_FAILURE_RATE: ${XYC_FAILURE_RATE:-0.3}
+    ports:
+      - "9001:9001"
+      - "9002:9002"
+
+  seed:
+    <<: *go-image
+    entrypoint: ["/usr/local/bin/seed"]
+    environment:
+      DB_DRIVER: postgres
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      SEED_PASSWORD: ${SEED_PASSWORD:?set in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *go-image
+    environment:
+      HTTP_ADDR: ":8080"
+      DB_DRIVER: postgres
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      JWT_SECRET: ${JWT_SECRET:?set in .env}
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
+      ABC_BASE_URL: http://mockvendors:9001
+      ABC_USERNAME: ${ABC_USERNAME}
+      ABC_PASSWORD: ${ABC_PASSWORD}
+      XYC_BASE_URL: http://mockvendors:9002
+      XYC_USERNAME: ${XYC_USERNAME}
+      XYC_PASSWORD: ${XYC_PASSWORD}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      seed:
+        condition: service_completed_successfully
+      mockvendors:
+        condition: service_started
+
+volumes:
+  pgdata:
