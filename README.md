@@ -209,9 +209,15 @@ user_credentials (id PK, user_id FK -> users, method, username, secret_hash NULL
   (max 100).
 - **Secrets** come only from environment variables (`.env` is git-ignored; production
   would use a secret manager). Vendor `Credentials` redact themselves when formatted.
-- Login is rate limited per IP; security headers are set on every response; the
-  container runs as non-root on a distroless image; Postgres is not published to the
-  host.
+- **Client IP trust model:** login is rate limited per client IP, and the IP is
+  resolved explicitly. By default the TCP peer address is used and client-supplied
+  `X-Forwarded-For`/`X-Real-IP` headers are ignored, so an attacker cannot rotate
+  headers to evade the limiter or pin a victim's IP to lock them out (chi's
+  `middleware.RealIP` trusts those headers blindly and is deliberately not used). Behind
+  a load balancer, set `TRUSTED_PROXY_CIDRS` so `X-Forwarded-For` is only honoured
+  through known proxies.
+- Security headers are set on every response; the container runs as non-root on a
+  distroless image; Postgres is not published to the host.
 
 ### Third-party `/auth` contract
 
@@ -253,7 +259,9 @@ except a stale ABC street address, and Alan is unknown to ABC but enriched by XY
 ```bash
 make test      # unit + SQLite contract tests, race detector
 make test-pg   # also runs the contract suite against a throwaway PostgreSQL
-make cover     # coverage across internal/... (currently ~88%)
+make cover     # coverage across internal/... on both databases, fails below 80% (currently ~88%)
+make ci        # gofmt, go vet, golangci-lint, coverage gate, govulncheck
+make pg-down   # stop the throwaway PostgreSQL container
 ```
 
 - **Repository contract suite** (`repositorytest`): one set of behavioural tests run
@@ -263,8 +271,33 @@ make cover     # coverage across internal/... (currently ~88%)
 - **Provider tests** run the adapters against the mock vendors and scripted
   `httptest` servers: retry counts, no retry on 4xx, re-auth on 401, token caching and
   refresh, context cancellation.
-- **HTTP tests** exercise the real router end to end over SQLite: auth, rate limiting,
-  validation, error envelope, and that secret hashes never appear in responses.
+- **HTTP tests** exercise the real router end to end over SQLite: auth, rate limiting
+  (including spoofed forwarding headers), validation, error envelope, and that secret
+  hashes never appear in responses.
+- **Frontend tests** (Vitest + Testing Library) cover the API client, components and
+  pages at ~97% statements, with thresholds enforced in `vite.config.ts`.
+
+## CI/CD and workflow
+
+| Workflow | Trigger | What it enforces |
+| --- | --- | --- |
+| `ci.yml` backend | push to `main`, PRs | gofmt, `go vet`, golangci-lint (gosec, errorlint, revive, ...), race-enabled tests against SQLite **and** a PostgreSQL service container, 80% coverage gate, `govulncheck` |
+| `ci.yml` frontend | push to `main`, PRs | ESLint, Prettier check, `tsc`, Vitest coverage thresholds, `npm audit --audit-level=high`, production build |
+| `ci.yml` docker | after both pass | builds the API and web images (BuildKit cache) |
+| `pr-title.yml` | PRs | Conventional Commit PR titles (`feat:`, `fix:`, `chore:`, ...) so squash merges keep a clean history |
+| `release.yml` | push to `main` | release-please generates `CHANGELOG.md` and release PRs from commit messages |
+
+Dependabot (`.github/dependabot.yml`) opens weekly grouped updates for Go modules, npm,
+GitHub Actions and Docker base images. Workflows run with read-only `GITHUB_TOKEN`
+permissions except release-please, which needs to open PRs.
+
+Branching: work happens on short-lived branches (`feat/backend`, `feat/frontend`,
+`chore/cicd` in this repo's history) merged into `main` with `--no-ff`. On GitHub,
+`main` would be protected to require a passing CI run and an approving review before
+merge; that is a repository setting rather than code.
+
+The Go toolchain is pinned in `go.mod` (`toolchain go1.26.8`) because `govulncheck`
+flagged reachable standard-library vulnerabilities in earlier 1.26 patch releases.
 
 ## Trade-offs
 

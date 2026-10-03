@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -192,11 +193,21 @@ func TestLoginRateLimited(t *testing.T) {
 	e := setup(t, nil)
 	var last int
 	for i := 0; i < 7; i++ {
-		resp, _ := e.do(t, http.MethodPost, "/api/v1/auth/login", "", map[string]string{"username": "ada", "password": "nope"})
+		// Rotating spoofed forwarding headers must not create fresh buckets.
+		req, _ := http.NewRequest(http.MethodPost, e.srv.URL+"/api/v1/auth/login",
+			strings.NewReader(`{"username":"ada","password":"nope"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", i))
+		req.Header.Set("X-Real-IP", fmt.Sprintf("198.51.100.%d", i))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
 		last = resp.StatusCode
 	}
 	if last != http.StatusTooManyRequests {
-		t.Fatalf("want 429 after limit, got %d", last)
+		t.Fatalf("want 429 after limit despite spoofed headers, got %d", last)
 	}
 }
 

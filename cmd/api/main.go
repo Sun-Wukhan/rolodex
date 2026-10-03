@@ -67,6 +67,7 @@ func run() error {
 		Handler: httpapi.NewRouter(httpapi.Deps{
 			Auth: auth, Profiles: profiles, Identity: identity, Ready: repo, Tokens: tokens, Log: log,
 			CORSAllowedOrigins: cfg.CORSAllowedOrigins, LoginRatePerMinute: cfg.LoginRatePerMinute,
+			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,

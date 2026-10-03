@@ -2,6 +2,8 @@ module github.com/navid/rolodex
 
 go 1.26.0
 
+toolchain go1.26.8
+
 require (
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/go-chi/cors v1.2.2
@@ -34,3 +36,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+ignore ./web/node_modules

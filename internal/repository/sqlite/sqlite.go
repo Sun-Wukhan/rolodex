@@ -115,7 +115,9 @@ func (r *Repository) SearchProfiles(ctx context.Context, q domain.SearchQuery) (
 	query := `SELECT p.user_id, p.name, p.phone, p.street_address, p.locality, p.region, p.postal_code, p.country
 	          FROM user_profiles p`
 	if len(where) > 0 {
-		query += " WHERE " + strings.Join(where, " AND ")
+		// Only constant SQL fragments with ? placeholders are concatenated; all
+		// user-supplied values are bound parameters.
+		query += " WHERE " + strings.Join(where, " AND ") //nolint:gosec // see above
 	}
 	query += " ORDER BY p.name, p.user_id LIMIT ? OFFSET ?"
 	args = append(args, q.Limit, q.Offset)

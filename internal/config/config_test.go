@@ -30,16 +30,17 @@ func TestLoadDefaultsAndOverrides(t *testing.T) {
 
 func TestLoadValidation(t *testing.T) {
 	_, err := load(env(map[string]string{
-		"JWT_SECRET":   "short",
-		"DB_DRIVER":    "mysql",
-		"JWT_TTL":      "soon",
-		"XYC_BASE_URL": "http://xyc",
-		"LOG_LEVEL":    "loud",
+		"JWT_SECRET":          "short",
+		"DB_DRIVER":           "mysql",
+		"JWT_TTL":             "soon",
+		"XYC_BASE_URL":        "http://xyc",
+		"LOG_LEVEL":           "loud",
+		"TRUSTED_PROXY_CIDRS": "10.0.0.0/8, not-a-cidr",
 	}))
 	if err == nil {
 		t.Fatal("expected errors")
 	}
-	for _, want := range []string{"JWT_SECRET", "DB_DRIVER", "JWT_TTL", "XYC_USERNAME", "LOG_LEVEL"} {
+	for _, want := range []string{"JWT_SECRET", "DB_DRIVER", "JWT_TTL", "XYC_USERNAME", "LOG_LEVEL", "not-a-cidr"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error missing %s: %v", want, err)
 		}

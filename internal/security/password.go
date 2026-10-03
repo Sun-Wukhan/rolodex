@@ -83,7 +83,10 @@ func (h *Argon2Hasher) Verify(password, encoded string) error {
 	if err != nil {
 		return fmt.Errorf("security: bad hash: %w", err)
 	}
-	got := argon2.IDKey([]byte(password), salt, p.Iterations, p.Memory, p.Parallelism, uint32(len(want)))
+	if len(want) < 16 || len(want) > 128 {
+		return fmt.Errorf("security: unsupported key length")
+	}
+	got := argon2.IDKey([]byte(password), salt, p.Iterations, p.Memory, p.Parallelism, uint32(len(want))) //nolint:gosec // bounded to 128 above
 	if subtle.ConstantTimeCompare(got, want) != 1 {
 		return ErrMismatch
 	}
