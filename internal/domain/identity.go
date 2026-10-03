@@ -15,11 +15,16 @@ type Identity struct {
 	Address  Address `json:"address"`
 }
 
-// FieldSource records which source supplied a field in an enriched profile.
+// FieldSource records which source supplied a field in an enriched profile and
+// which providers independently confirmed the same value.
 type FieldSource struct {
-	Value  string `json:"value"`
-	Source string `json:"source"`
+	Value      string   `json:"value"`
+	Source     string   `json:"source"`
+	VerifiedBy []string `json:"verified_by"`
 }
+
+// SourceLocal marks a value that came from our own datastore.
+const SourceLocal = "local"
 
 // ProviderResult describes the outcome of a single provider lookup.
 type ProviderResult struct {
