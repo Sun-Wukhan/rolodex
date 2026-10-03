@@ -1,0 +1,2 @@
+# ZAP API scan rule overrides: <plugin id>\t<IGNORE|INFO|WARN|FAIL>\t<justification>
+# Every IGNORE is an accepted risk and must say why.

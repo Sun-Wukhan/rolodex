@@ -8,7 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
-	mrand "math/rand/v2"
+	mrand "math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- failure injection only, not security relevant
 	"net/http"
 	"strings"
 	"sync"

@@ -1,0 +1,6 @@
+# ZAP baseline rule overrides: <plugin id>\t<IGNORE|INFO|WARN|FAIL>\t<justification>
+# Every override is an accepted risk and must say why; INFO keeps it visible in reports.
+10027	INFO	Suspicious comments: matches are identifiers inside the minified React/router vendor bundle, not developer comments.
+10049	INFO	Non-storable content: index.html is deliberately Cache-Control no-store so deployments take effect immediately.
+10055	INFO	CSP style-src 'unsafe-inline': styled-components injects <style> tags at runtime and static nginx cannot issue per-request nonces. script-src stays 'self', so injected markup cannot execute script.
+10109	INFO	Modern Web Application: informational detection of a single-page app; no risk.
