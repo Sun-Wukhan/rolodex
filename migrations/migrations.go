@@ -10,6 +10,7 @@ import (
 	"io/fs"
 
 	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
 )
 
 //go:embed postgres/*.sql sqlite/*.sql
@@ -19,9 +20,17 @@ var files embed.FS
 // "sqlite").
 func Up(ctx context.Context, db *sql.DB, dialect string) error {
 	var gd goose.Dialect
+	var opts []goose.ProviderOption
 	switch dialect {
 	case "postgres":
 		gd = goose.DialectPostgres
+		// Replicas start concurrently (e.g. a Kubernetes Deployment); an
+		// advisory lock ensures only one of them applies migrations.
+		locker, err := lock.NewPostgresSessionLocker()
+		if err != nil {
+			return fmt.Errorf("migrations: %w", err)
+		}
+		opts = append(opts, goose.WithSessionLocker(locker))
 	case "sqlite":
 		gd = goose.DialectSQLite3
 	default:
@@ -31,7 +40,7 @@ func Up(ctx context.Context, db *sql.DB, dialect string) error {
 	if err != nil {
 		return fmt.Errorf("migrations: %w", err)
 	}
-	provider, err := goose.NewProvider(gd, db, sub)
+	provider, err := goose.NewProvider(gd, db, sub, opts...)
 	if err != nil {
 		return fmt.Errorf("migrations: %w", err)
 	}

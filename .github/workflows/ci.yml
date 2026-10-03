@@ -104,6 +104,17 @@ jobs:
         run: npm audit --audit-level=high
       - run: npm run build
 
+  manifests:
+    name: Kubernetes manifests and scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - name: Render kustomization
+        run: kubectl kustomize deploy/k8s > /dev/null
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
   docker:
     name: Docker images
     runs-on: ubuntu-latest

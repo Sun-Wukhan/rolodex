@@ -1,5 +1,13 @@
 # Rolodex
 
+[![CI](https://github.com/Sun-Wukhan/rolodex/actions/workflows/ci.yml/badge.svg)](https://github.com/Sun-Wukhan/rolodex/actions/workflows/ci.yml)
+[![Pages demo](https://github.com/Sun-Wukhan/rolodex/actions/workflows/pages.yml/badge.svg)](https://sun-wukhan.github.io/rolodex/)
+
+| | |
+| --- | --- |
+| **Live demo** | https://sun-wukhan.github.io/rolodex/ (static build, in-browser API; see [Hosting](#hosting)) |
+| **Status page** | https://sun-wukhan.github.io/rolodex-status/ ([source](https://github.com/Sun-Wukhan/rolodex-status)) |
+
 A small identity service built for the LoginID code review exercise. It:
 
 1. stores **user profiles** and **user credentials** behind a database-agnostic DAO
@@ -45,12 +53,42 @@ connection pooling, embedded migrations (goose), structured logging (`log/slog`)
 
 ## Quick start
 
-Requirements: Docker (with Compose) and Make. Go 1.26+ and Node 20+ only for running
-outside Docker.
+There are four ways to run Rolodex. All of the local ones read secrets from a
+git-ignored `.env`; create it once:
 
 ```bash
-make up            # creates .env from .env.example, builds and starts everything
+git clone https://github.com/Sun-Wukhan/rolodex.git && cd rolodex
+make env           # copies .env.example to .env; edit the change-me values
+make help          # lists every target, grouped by how you want to run it
 ```
+
+| Option | Command | Needs | Datastore | Open |
+| --- | --- | --- | --- | --- |
+| Hosted demo | nothing | a browser | in-browser | https://sun-wukhan.github.io/rolodex/ |
+| Local, no Docker | `make dev` | Go 1.26+, Node 22+ | SQLite | http://localhost:5173 |
+| Docker Compose | `make up` | Docker | PostgreSQL | http://localhost:3000 |
+| Minikube | `make k8s-up` then `make k8s-forward` | minikube, kubectl | PostgreSQL | http://localhost:3000 |
+
+Seeded users: `admin`, `ada`, `grace`, `alan`, `katherine`, all with the
+`SEED_PASSWORD` from `.env` (in the hosted demo, any password of 12+ characters).
+
+Demo flow in the UI: sign in as `admin`, search by name for "a", open a profile and
+click **Check all**. Grace gets her missing street and postal code from ABC; Katherine
+is verified by both vendors except for ABC's stale street address; Alan is unknown to
+ABC but fully enriched by XYC.
+
+### Local without Docker
+
+`make dev` builds the Go binaries, starts the mock vendors (:9001, :9002), seeds a
+SQLite file (`rolodex.db`), starts the API (:8080) and the Vite dev server (:5173),
+prefixing each process's logs. Ctrl-C stops everything. The individual pieces are also
+available as `make run-mock`, `make seed-local`, `make run-api` and `make web`.
+
+### Docker Compose
+
+`make up` builds one distroless image for the three Go binaries plus an nginx image for
+the UI, and starts PostgreSQL, the mock vendors, a one-shot seed job, the API and the
+web app. `make logs` tails the API, `make down` removes everything including data.
 
 | Service      | URL                      | Notes                                 |
 | ------------ | ------------------------ | ------------------------------------- |
@@ -58,8 +96,34 @@ make up            # creates .env from .env.example, builds and starts everythin
 | API          | http://localhost:8080    | OpenAPI spec in `api/openapi.yaml`    |
 | Mock vendors | :9001 (ABC), :9002 (XYC) | XYC injects 503s to exercise retries  |
 
-Seeded users: `admin`, `ada`, `grace`, `alan`, `katherine`, all with the
-`SEED_PASSWORD` from `.env`.
+### Minikube
+
+```bash
+make k8s-up        # starts minikube if needed, builds images inside it, deploys, waits
+make k8s-forward   # API -> localhost:8080, web -> localhost:3000 (Ctrl-C to stop)
+make k8s-status    # pods, services, jobs, volumes
+make k8s-down      # deletes the rolodex namespace
+```
+
+Manifests live in [`deploy/k8s`](deploy/k8s) (plain YAML composed with kustomize):
+
+- **PostgreSQL** StatefulSet with a 1Gi PersistentVolumeClaim and a readiness probe.
+- **API** Deployment with 2 replicas, `/readyz` readiness and `/healthz` liveness
+  probes. Migrations take a PostgreSQL advisory lock, so replicas starting together
+  never race.
+- **Seed** Job (idempotent, retries until PostgreSQL is ready), **mock vendors** and
+  **web** Deployments.
+- The `rolodex-env` Secret is generated from your `.env` by `make k8s-secret`, so no
+  credentials are committed. Images are built straight into minikube
+  (`imagePullPolicy: Never`); no registry is involved.
+- Pods run as non-root with a `RuntimeDefault` seccomp profile, no privilege
+  escalation, all capabilities dropped, read-only root filesystems for the Go
+  containers, no service-account token and resource requests/limits.
+
+Port-forwarding is used instead of an Ingress because it behaves the same on every
+minikube driver (on macOS the Docker driver cannot reach node IPs directly).
+
+### Calling the API directly
 
 ```bash
 TOKEN=$(curl -s -X POST localhost:8080/api/v1/auth/login \
@@ -71,13 +135,40 @@ curl -s -X POST "localhost:8080/api/v1/users/<id>/enrich?provider=abc,xyc" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Without Docker (SQLite): `make env`, then `make run-mock`, `make seed-local`,
-`make run-api` and `make web` (http://localhost:5173) in separate terminals.
+## Hosting
 
-Demo flow in the UI: sign in as `admin`, search by name for "a", open a profile and
-click **Check all**. Grace gets her missing street and postal code from ABC; Katherine
-is verified by both vendors except for ABC's stale street address; Alan is unknown to
-ABC but fully enriched by XYC.
+GitHub Pages serves static files only, so it cannot run the Go API or PostgreSQL.
+Rather than require a cloud account, the hosted site is a **demo build** of the same
+React app:
+
+- `pages.yml` builds `web/` with `VITE_DEMO_MODE=true` and deploys it to
+  https://sun-wukhan.github.io/rolodex/ on every push to `main` that touches `web/`.
+- In demo mode the API client's `fetch` is swapped for an in-browser implementation of
+  the Rolodex API ([`web/src/demo`](web/src/demo)). It mirrors the backend's
+  validation, search semantics, phone normalisation and enrichment merge rules over the
+  same seed and mock-vendor datasets, and is unit tested through the real API client.
+  Data lives in memory and resets on reload.
+- No password is embedded in the bundle: any seeded username signs in with any 12+
+  character password, and the login page says so.
+- Deep links work through a `404.html` copy of `index.html` (Pages has no SPA
+  rewrites), and `VITE_BASE_PATH` serves the app under `/rolodex/`.
+
+The real backend runs locally, in Compose or on minikube. The production path
+(Cloud Run + Cloud SQL, deployed by GitHub Actions with Workload Identity Federation) is
+described in [docs/DESIGN.md](docs/DESIGN.md#7-deployment-path-not-provisioned).
+
+### Status page
+
+A separate repository, [Sun-Wukhan/rolodex-status](https://github.com/Sun-Wukhan/rolodex-status),
+monitors the hosted demo and publishes https://sun-wukhan.github.io/rolodex-status/:
+
+- A GitHub Actions cron job checks every target in `targets.json` every 5 minutes
+  (GitHub's minimum interval) and commits status code and latency to a `data` branch.
+- The page re-fetches that history **every minute**, probes each target from the
+  visitor's browser at the same cadence, and redraws a 24-hour response-time graph with
+  outage markers, 24h/7d uptime and a strip of the last 90 checks.
+- When the API gets a public URL, adding its `/healthz` to `targets.json` monitors it
+  too.
 
 ## Architecture
 
@@ -155,6 +246,7 @@ web/src/
   auth/         in-memory session context, provider, route guard
   components/   reusable styled-components primitives: Button, TextField, Card,
                 Badge, Alert, Spinner, Layout, EnrichmentResults
+  demo/         in-browser API used by the static GitHub Pages build
   pages/        login, search, profile + enrichment, add user
   styles/       theme tokens (typed DefaultTheme) and global styles
 ```
@@ -260,7 +352,7 @@ except a stale ABC street address, and Alan is unknown to ABC but enriched by XY
 make test      # unit + SQLite contract tests, race detector
 make test-pg   # also runs the contract suite against a throwaway PostgreSQL
 make cover     # coverage across internal/... on both databases, fails below 80% (currently ~88%)
-make ci        # gofmt, go vet, golangci-lint, coverage gate, govulncheck
+make ci        # gofmt, go vet, golangci-lint, coverage gate, govulncheck, frontend checks
 make pg-down   # stop the throwaway PostgreSQL container
 ```
 
