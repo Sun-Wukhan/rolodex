@@ -1,5 +1,7 @@
 .git
 web
+e2e
+dast-reports
 bin
 *.db
 *.db-*

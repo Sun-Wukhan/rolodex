@@ -1,0 +1,19 @@
+{
+  "name": "rolodex-e2e",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Post-deployment browser tests for the Rolodex web app (staging and production).",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "format:check": "prettier --check .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^22.19.0",
+    "prettier": "^3.9.9",
+    "typescript": "^6.0.3"
+  }
+}
