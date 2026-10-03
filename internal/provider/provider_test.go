@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/mockvendor"
-	"github.com/navid/rolodex/internal/provider"
-	"github.com/navid/rolodex/internal/provider/abc"
-	"github.com/navid/rolodex/internal/provider/xyc"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/mockvendor"
+	"github.com/Sun-Wukhan/rolodex/internal/provider"
+	"github.com/Sun-Wukhan/rolodex/internal/provider/abc"
+	"github.com/Sun-Wukhan/rolodex/internal/provider/xyc"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))

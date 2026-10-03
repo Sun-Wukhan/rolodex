@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/navid/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
 )
 
 // Format selects the vendor's wire format.

@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/provider"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/provider"
 )
 
 var discard = slog.New(slog.NewTextHandler(io.Discard, nil))

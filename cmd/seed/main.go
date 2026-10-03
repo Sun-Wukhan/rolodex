@@ -10,10 +10,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/repository/factory"
-	"github.com/navid/rolodex/internal/security"
-	"github.com/navid/rolodex/internal/service"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/factory"
+	"github.com/Sun-Wukhan/rolodex/internal/security"
+	"github.com/Sun-Wukhan/rolodex/internal/service"
 )
 
 func main() {

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/navid/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
 )
 
 // UserRepository stores and retrieves users, their profile and credentials.

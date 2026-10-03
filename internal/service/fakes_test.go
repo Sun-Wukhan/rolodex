@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/navid/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
 )
 
 // memRepo is a minimal in-memory repository.UserRepository for unit tests.

@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/navid/rolodex/internal/mockvendor"
+	"github.com/Sun-Wukhan/rolodex/internal/mockvendor"
 )
 
 func main() {

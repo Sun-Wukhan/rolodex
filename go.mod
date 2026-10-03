@@ -1,4 +1,4 @@
-module github.com/navid/rolodex
+module github.com/Sun-Wukhan/rolodex
 
 go 1.26.0
 

@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/httpapi"
-	"github.com/navid/rolodex/internal/provider"
-	"github.com/navid/rolodex/internal/repository/sqlite"
-	"github.com/navid/rolodex/internal/security"
-	"github.com/navid/rolodex/internal/service"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/httpapi"
+	"github.com/Sun-Wukhan/rolodex/internal/provider"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/sqlite"
+	"github.com/Sun-Wukhan/rolodex/internal/security"
+	"github.com/Sun-Wukhan/rolodex/internal/service"
 )
 
 type stubProvider struct{}

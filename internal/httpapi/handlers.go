@@ -15,8 +15,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
-	"github.com/navid/rolodex/internal/domain"
-	"github.com/navid/rolodex/internal/service"
+	"github.com/Sun-Wukhan/rolodex/internal/domain"
+	"github.com/Sun-Wukhan/rolodex/internal/service"
 )
 
 const maxBodyBytes = 1 << 20
