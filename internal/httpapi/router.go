@@ -21,6 +21,10 @@ type Deps struct {
 	Log                *slog.Logger
 	CORSAllowedOrigins []string
 	LoginRatePerMinute int
+	// TrustedProxyCIDRs lists reverse proxies whose X-Forwarded-For entries are
+	// trusted. Empty means the API is exposed directly and the TCP peer address
+	// is the client IP; client-supplied forwarding headers are then ignored.
+	TrustedProxyCIDRs []string
 }
 
 // NewRouter builds the HTTP handler with all routes and middleware.
@@ -29,7 +33,11 @@ func NewRouter(d Deps) http.Handler {
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
-	r.Use(middleware.RealIP)
+	if len(d.TrustedProxyCIDRs) > 0 {
+		r.Use(middleware.ClientIPFromXFF(d.TrustedProxyCIDRs...))
+	} else {
+		r.Use(middleware.ClientIPFromRemoteAddr)
+	}
 	r.Use(requestLogger(d.Log))
 	r.Use(middleware.Recoverer)
 	r.Use(securityHeaders)
@@ -46,7 +54,7 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/readyz", h.readyz)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.With(httprate.LimitByIP(d.LoginRatePerMinute, time.Minute)).Post("/auth/login", h.login)
+		r.With(httprate.LimitBy(d.LoginRatePerMinute, time.Minute, clientIPKey)).Post("/auth/login", h.login)
 
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth(d.Tokens))
@@ -66,4 +74,10 @@ func NewRouter(d Deps) http.Handler {
 		writeError(w, r, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed", nil)
 	})
 	return r
+}
+
+// clientIPKey buckets rate limits by the client IP resolved by the trusted
+// ClientIPFrom* middleware (IPv6 grouped by /64).
+func clientIPKey(r *http.Request) (string, error) {
+	return httprate.CanonicalizeIP(middleware.GetClientIP(r.Context())), nil
 }

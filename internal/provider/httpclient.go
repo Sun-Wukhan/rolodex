@@ -121,7 +121,7 @@ func (c *Client) PostJSON(ctx context.Context, path string, in, out any) error {
 			return domain.ErrNotFound
 		case status >= 200 && status < 300:
 			if err := json.Unmarshal(body, out); err != nil {
-				return fmt.Errorf("%w: %v", ErrBadResponse, err)
+				return fmt.Errorf("%w: %w", ErrBadResponse, err)
 			}
 			return nil
 		default:
@@ -185,7 +185,7 @@ func (c *Client) send(ctx context.Context, path string, in any, token string) (i
 	for attempt := 1; attempt <= c.retry.MaxAttempts; attempt++ {
 		if attempt > 1 {
 			if err := sleep(ctx, c.backoff(attempt-1)); err != nil {
-				return 0, nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+				return 0, nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 			}
 		}
 
@@ -202,7 +202,7 @@ func (c *Client) send(ctx context.Context, path string, in any, token string) (i
 		resp, err := c.http.Do(req)
 		if err != nil {
 			if ctx.Err() != nil {
-				return 0, nil, fmt.Errorf("%w: %v", ErrUnavailable, ctx.Err())
+				return 0, nil, fmt.Errorf("%w: %w", ErrUnavailable, ctx.Err())
 			}
 			lastErr = err
 			continue
@@ -219,16 +219,17 @@ func (c *Client) send(ctx context.Context, path string, in any, token string) (i
 		}
 		return resp.StatusCode, body, nil
 	}
-	return 0, nil, fmt.Errorf("%w: after %d attempts: %v", ErrUnavailable, c.retry.MaxAttempts, lastErr)
+	return 0, nil, fmt.Errorf("%w: after %d attempts: %w", ErrUnavailable, c.retry.MaxAttempts, lastErr)
 }
 
-// backoff returns exponential delay with full jitter, capped at MaxDelay.
+// backoff returns exponential delay with "equal jitter" (half fixed, half
+// random), capped at MaxDelay, so concurrent clients do not retry in lockstep.
 func (c *Client) backoff(retry int) time.Duration {
 	d := c.retry.BaseDelay << (retry - 1)
 	if d > c.retry.MaxDelay || d <= 0 {
 		d = c.retry.MaxDelay
 	}
-	return d/2 + rand.N(d/2+1)
+	return d/2 + rand.N(d/2+1) //nolint:gosec // jitter does not need cryptographic randomness
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

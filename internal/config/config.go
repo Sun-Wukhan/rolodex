@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"os"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ type Config struct {
 	JWTIssuer           string
 	JWTTTL              time.Duration
 	CORSAllowedOrigins  []string
+	TrustedProxyCIDRs   []string
 	LoginRatePerMinute  int
 	ProviderTimeout     time.Duration
 	ProviderHTTPTimeout time.Duration
@@ -72,6 +74,7 @@ func load(getenv func(string) string) (Config, error) {
 		JWTIssuer:           get("JWT_ISSUER", "rolodex"),
 		JWTTTL:              dur("JWT_TTL", 15*time.Minute),
 		CORSAllowedOrigins:  splitCSV(get("CORS_ALLOWED_ORIGINS", "http://localhost:5173")),
+		TrustedProxyCIDRs:   splitCSV(get("TRUSTED_PROXY_CIDRS", "")),
 		ProviderTimeout:     dur("PROVIDER_TIMEOUT", 8*time.Second),
 		ProviderHTTPTimeout: dur("PROVIDER_HTTP_TIMEOUT", 3*time.Second),
 		ABC:                 ProviderConfig{BaseURL: get("ABC_BASE_URL", ""), Username: get("ABC_USERNAME", ""), Password: get("ABC_PASSWORD", "")},
@@ -81,6 +84,11 @@ func load(getenv func(string) string) (Config, error) {
 
 	if _, err := fmt.Sscanf(get("LOGIN_RATE_PER_MINUTE", "10"), "%d", &cfg.LoginRatePerMinute); err != nil || cfg.LoginRatePerMinute <= 0 {
 		errs = append(errs, errors.New("LOGIN_RATE_PER_MINUTE: must be a positive integer"))
+	}
+	for _, cidr := range cfg.TrustedProxyCIDRs {
+		if _, err := netip.ParsePrefix(cidr); err != nil {
+			errs = append(errs, fmt.Errorf("TRUSTED_PROXY_CIDRS: invalid CIDR %q", cidr))
+		}
 	}
 	if len(cfg.JWTSecret) < 32 {
 		errs = append(errs, errors.New("JWT_SECRET: required, at least 32 bytes"))

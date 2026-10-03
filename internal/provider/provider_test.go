@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -102,7 +103,7 @@ type scripted struct {
 func (s *scripted) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/auth" {
 		n := s.authCalls.Add(1)
-		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "tok-" + string(rune('0'+n)), "expires_in": s.tokenTTL})
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": fmt.Sprintf("tok-%d", n), "expires_in": s.tokenTTL})
 		return
 	}
 	i := int(s.identityCalls.Add(1)) - 1
