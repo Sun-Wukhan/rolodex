@@ -66,5 +66,15 @@ services:
       mockvendors:
         condition: service_started
 
+  web:
+    build:
+      context: ./web
+      args:
+        VITE_API_URL: http://localhost:8080
+    ports:
+      - "3000:8080"
+    depends_on:
+      - api
+
 volumes:
   pgdata:

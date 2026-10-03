@@ -52,10 +52,11 @@ outside Docker.
 make up            # creates .env from .env.example, builds and starts everything
 ```
 
-| Service      | URL                    | Notes                                   |
-| ------------ | ---------------------- | --------------------------------------- |
-| API          | http://localhost:8080  | OpenAPI spec in `api/openapi.yaml`      |
-| Mock vendors | :9001 (ABC), :9002 (XYC) | XYC injects 503s to exercise retries |
+| Service      | URL                      | Notes                                 |
+| ------------ | ------------------------ | ------------------------------------- |
+| Web UI       | http://localhost:3000    | React app served by nginx             |
+| API          | http://localhost:8080    | OpenAPI spec in `api/openapi.yaml`    |
+| Mock vendors | :9001 (ABC), :9002 (XYC) | XYC injects 503s to exercise retries  |
 
 Seeded users: `admin`, `ada`, `grace`, `alan`, `katherine`, all with the
 `SEED_PASSWORD` from `.env`.
@@ -70,8 +71,13 @@ curl -s -X POST "localhost:8080/api/v1/users/<id>/enrich?provider=abc,xyc" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-Without Docker (SQLite): `make env`, then `make run-mock`, `make seed-local` and
-`make run-api` in separate terminals.
+Without Docker (SQLite): `make env`, then `make run-mock`, `make seed-local`,
+`make run-api` and `make web` (http://localhost:5173) in separate terminals.
+
+Demo flow in the UI: sign in as `admin`, search by name for "a", open a profile and
+click **Check all**. Grace gets her missing street and postal code from ABC; Katherine
+is verified by both vendors except for ABC's stale street address; Alan is unknown to
+ABC but fully enriched by XYC.
 
 ## Architecture
 
