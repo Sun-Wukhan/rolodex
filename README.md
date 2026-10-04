@@ -34,6 +34,13 @@ A user has exactly one profile and one or more credentials (`password`, `oauth`,
 `passkey`). Passwords are hashed with Argon2id and are never returned by the API or
 written to logs.
 
+Profiles and credentials live in **two separate databases**, each with its own
+account: the profiles database (`DATABASE_URL`, `POSTGRES_*`) holds names, phone
+numbers and addresses; the credentials database (`CREDENTIALS_DATABASE_URL`,
+`CREDENTIALS_DB_*`) holds usernames and password hashes. Under Docker Compose and
+Kubernetes they are separate PostgreSQL servers; locally they are two SQLite files. See
+[Database design](#database-design).
+
 The REST API uses short-lived HS256 bearer JWTs issued by `POST /api/v1/auth/login`.
 ABC and XYC are treated as interchangeable implementations of an `IdentityProvider`
 interface. Their `/auth` + `/identity` contract is treated as an external contract we
@@ -70,8 +77,17 @@ make help          # lists every target, grouped by how you want to run it
 | Docker Compose | `make up` | Docker | PostgreSQL | http://localhost:3000 |
 | Minikube | `make k8s-up` then `make k8s-forward` | minikube, kubectl | PostgreSQL | http://localhost:3000 |
 
-Seeded users: `admin`, `ada`, `grace`, `alan`, `katherine`, all with the
-`SEED_PASSWORD` from `.env` (in the hosted demo, any password of 12+ characters).
+### Signing in
+
+| Where | Username | Password |
+| --- | --- | --- |
+| `make dev`, `make up`, minikube | `admin` (or `ada`, `grace`, `alan`, `katherine`) | the `SEED_PASSWORD` value in your `.env` |
+| Hosted demo (GitHub Pages) | any of the usernames above | anything of 12+ characters |
+
+`make login-info` prints the exact username and password for your `.env`. The seed
+only creates missing users, so changing `SEED_PASSWORD` later does not change existing
+accounts; reset the data (`make down`, `make k8s-down`, or delete the `*.db` files) and
+start again to apply a new one.
 
 Demo flow in the UI: sign in as `admin`, search by name for "a", open a profile and
 click **Check all**. Grace gets her missing street and postal code from ABC; Katherine
@@ -80,16 +96,17 @@ ABC but fully enriched by XYC.
 
 ### Local without Docker
 
-`make dev` builds the Go binaries, starts the mock vendors (:9001, :9002), seeds a
-SQLite file (`rolodex.db`), starts the API (:8080) and the Vite dev server (:5173),
+`make dev` builds the Go binaries, starts the mock vendors (:9001, :9002), seeds two
+SQLite files (`rolodex.db` for profiles, `rolodex-credentials.db` for credentials),
+starts the API (:8080) and the Vite dev server (:5173),
 prefixing each process's logs. Ctrl-C stops everything. The individual pieces are also
 available as `make run-mock`, `make seed-local`, `make run-api` and `make web`.
 
 ### Docker Compose
 
 `make up` builds one distroless image for the three Go binaries plus an nginx image for
-the UI, and starts PostgreSQL, the mock vendors, a one-shot seed job, the API and the
-web app. `make logs` tails the API, `make down` removes everything including data.
+the UI, and starts two PostgreSQL servers (`postgres` for profiles, `credentials-db`
+for credentials), the mock vendors, a one-shot seed job, the API and the web app. `make logs` tails the API, `make down` removes everything including data.
 
 | Service      | URL                      | Notes                                 |
 | ------------ | ------------------------ | ------------------------------------- |
@@ -108,11 +125,13 @@ make k8s-down      # deletes the rolodex namespace
 
 Manifests live in [`deploy/k8s`](deploy/k8s) (plain YAML composed with kustomize):
 
-- **PostgreSQL** StatefulSet with a 1Gi PersistentVolumeClaim and a readiness probe.
+- Two **PostgreSQL** StatefulSets, `postgres` (profiles) and `credentials-db`
+  (credentials), each with its own account, 1Gi PersistentVolumeClaim and readiness
+  probe.
 - **API** Deployment with 2 replicas, `/readyz` readiness and `/healthz` liveness
   probes. Migrations take a PostgreSQL advisory lock, so replicas starting together
   never race.
-- **Seed** Job (idempotent, retries until PostgreSQL is ready), **mock vendors** and
+- **Seed** Job (idempotent, retries until both databases are ready), **mock vendors** and
   **web** Deployments.
 - The `rolodex-env` Secret is generated from your `.env` by `make k8s-secret`, so no
   credentials are committed. Images are built straight into minikube
@@ -187,8 +206,9 @@ flowchart TD
     Identity --> Repo
     Identity --> Providers
   end
-  Repo[UserRepository interface] --> PG[(PostgreSQL)]
-  Repo --> SQ[(SQLite)]
+  Repo[UserRepository interface] --> Split[split repository]
+  Split --> PS[ProfileStore] --> ProfilesDB[("profiles DB<br/>(PostgreSQL or SQLite)")]
+  Split --> CS[CredentialStore] --> CredentialsDB[("credentials DB<br/>(PostgreSQL or SQLite)")]
   Providers[IdentityProvider interface] --> ABC[abc adapter]
   Providers --> XYC[xyc adapter]
   ABC -->|"POST /auth, /identity"| VendorABC[ABC vendor]
@@ -206,18 +226,19 @@ cmd/
 internal/
   config/         env-var configuration, validated at startup
   domain/         entities, value types, sentinel errors (no dependencies)
-  repository/     UserRepository contract
-    postgres/     PostgreSQL (and CockroachDB) implementation
-    sqlite/       SQLite implementation (pure Go, no cgo)
+  repository/     UserRepository, ProfileStore and CredentialStore contracts
+    split/        UserRepository over separate profiles + credentials databases
+    postgres/     PostgreSQL (and CockroachDB) stores
+    sqlite/       SQLite stores (pure Go, no cgo)
     repositorytest/  one contract suite run against every implementation
-    factory/      picks an implementation from DB_DRIVER
+    factory/      picks an implementation from DB_DRIVER and opens both databases
   service/        business logic: auth, profiles, identity enrichment
   provider/       IdentityProvider contract + resilient vendor HTTP client
     abc/ xyc/     vendor adapters (wire format -> domain.Identity)
   httpapi/        chi router, middleware, handlers, error envelope
   security/       Argon2id hasher, JWT issuer/verifier
   mockvendor/     mock vendor implementation used by cmd/mockvendors and tests
-migrations/       embedded goose migrations per dialect
+migrations/       embedded goose migrations per dialect and database
 api/openapi.yaml  API contract
 ```
 
@@ -271,19 +292,32 @@ web/src/
 ## Database design
 
 ```
-users            (id PK, created_at, updated_at)
-user_profiles    (user_id PK/FK -> users, name, phone E.164, street_address,
-                  locality, region, postal_code, country)          1:1
-user_credentials (id PK, user_id FK -> users, method, username, secret_hash NULL,
-                  created_at, last_used_at, UNIQUE(method, username))  1:N
+profiles database (DATABASE_URL)
+  users            (id PK, created_at, updated_at)
+  user_profiles    (user_id PK/FK -> users, name, phone E.164, street_address,
+                    locality, region, postal_code, country)          1:1
+
+credentials database (CREDENTIALS_DATABASE_URL)
+  user_credentials (id PK, user_id -> profiles.users, method, username,
+                    secret_hash NULL, created_at, last_used_at,
+                    UNIQUE(method, username))                        1:N
 ```
 
-- Profile and credentials are separate tables: PII and authentication material have
-  different access patterns, retention and audit requirements.
+- Profiles and credentials are separate **databases**, not just tables: PII and
+  authentication material have different access patterns, retention and audit
+  requirements, and a leaked profiles password or backup exposes no password hashes.
+  The API refuses to start if both URLs point at the same database.
+- No transaction spans the two databases, so the `split` repository orders and
+  compensates writes: the credential is written first (its unique username is the
+  likeliest conflict), then the user and profile in one transaction; if that fails, the
+  credential is deleted again. `user_id` cannot be a foreign key across databases, so
+  adding a credential checks that the user exists first.
+- Username search resolves matching user IDs in the credentials database, then
+  filters profiles by those IDs.
+- Each database has its own migration set and goose version table.
 - `secret_hash` is nullable because OAuth/passkey credentials carry no shared secret.
 - Phone numbers are normalised to E.164 on write so search is an indexed equality.
 - Indexes on `phone`, `lower(name)`, `lower(username)` and `user_credentials.user_id`.
-- User creation (user + profile + first credential) is a single transaction.
 
 ## Security decisions
 
@@ -465,6 +499,10 @@ flagged reachable standard-library vulnerabilities in earlier 1.26 patch release
   It is a dev/test/single-node option, not the production target.
 - **Username search uses `LIKE '%term%'`**: a trigram index (`pg_trgm`) would back this
   at scale.
+- **Two databases without distributed transactions**: compensation keeps them
+  consistent in normal operation, but a crash between the two writes can leave an
+  orphaned credential. A periodic reconciliation job (or an outbox) would clean those
+  up in production; two-phase commit was not worth its operational cost here.
 
 ## What I would add in production
 

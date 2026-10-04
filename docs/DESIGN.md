@@ -21,7 +21,8 @@ flowchart LR
   repository --> domain
   provider --> domain
   service --> domain
-  postgres --> repository_contract["repository (contract)"]
+  split --> repository_contract["repository (contracts)"]
+  postgres --> repository_contract
   sqlite --> repository_contract
   abc --> provider_client["provider.Client"]
   xyc --> provider_client
@@ -58,7 +59,7 @@ erDiagram
   }
   user_credentials {
     uuid id PK
-    uuid user_id FK
+    uuid user_id "refs users.id (other database)"
     text method
     text username
     text secret_hash
@@ -69,13 +70,20 @@ erDiagram
 
 - `users` is a thin aggregate root, so profile and credentials can evolve, be secured
   and be retained independently.
+- `users` and `user_profiles` live in the **profiles database**; `user_credentials`
+  lives in a separate **credentials database** with its own server and account. Each
+  driver implements two small stores (`ProfileStore`, `CredentialStore`) and the
+  `split` package composes them into the `UserRepository` the services use, so the
+  service layer did not change. Cross-database writes are ordered and compensated
+  (credential first, then profile, delete the credential if the profile fails), and
+  username search becomes "IDs from credentials, then profiles by ID".
 - `UNIQUE(method, username)` lets the same identifier exist for different methods
   (e.g. a password username and an OAuth subject) while preventing duplicates within a
   method. Usernames are lower-cased on write.
 - Address columns are `NOT NULL DEFAULT ''` rather than nullable to keep scanning
   simple and treat "unknown" uniformly. Country is ISO 3166-1 alpha-2.
-- Migrations are embedded per dialect and applied at startup with goose's provider API
-  (no global state). In production, migrations would run as a separate release step.
+- Migrations are embedded per dialect and per database, each with its own goose
+  version table, and applied at startup with goose's provider API (no global state). In production, migrations would run as a separate release step.
 
 ## 4. Authentication flow
 
