@@ -27,6 +27,7 @@ type Config struct {
 	HTTPAddr            string
 	DBDriver            string
 	DatabaseURL         string
+	DatabaseReadURL     string
 	CredentialsDBURL    string
 	JWTSecret           []byte
 	JWTIssuer           string
@@ -71,6 +72,7 @@ func load(getenv func(string) string) (Config, error) {
 		HTTPAddr:            get("HTTP_ADDR", ":8080"),
 		DBDriver:            get("DB_DRIVER", "sqlite"),
 		DatabaseURL:         get("DATABASE_URL", "rolodex.db"),
+		DatabaseReadURL:     get("DATABASE_READ_URL", ""),
 		CredentialsDBURL:    get("CREDENTIALS_DATABASE_URL", "rolodex-credentials.db"),
 		JWTSecret:           []byte(get("JWT_SECRET", "")),
 		JWTIssuer:           get("JWT_ISSUER", "rolodex"),
@@ -100,6 +102,12 @@ func load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.DBDriver == "postgres" && (get("DATABASE_URL", "") == "" || get("CREDENTIALS_DATABASE_URL", "") == "") {
 		errs = append(errs, errors.New("DATABASE_URL and CREDENTIALS_DATABASE_URL: both required with DB_DRIVER=postgres"))
+	}
+	if cfg.DatabaseReadURL != "" && cfg.DBDriver != "postgres" {
+		errs = append(errs, errors.New("DATABASE_READ_URL: read replicas require DB_DRIVER=postgres"))
+	}
+	if cfg.DatabaseReadURL != "" && cfg.DatabaseReadURL == cfg.DatabaseURL {
+		errs = append(errs, errors.New("DATABASE_READ_URL: must point at a replica, not the primary DATABASE_URL"))
 	}
 	if cfg.DatabaseURL == cfg.CredentialsDBURL {
 		errs = append(errs, errors.New("CREDENTIALS_DATABASE_URL: must point at a different database than DATABASE_URL"))

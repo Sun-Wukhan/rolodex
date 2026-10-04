@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"net/url"
 	"os"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/Sun-Wukhan/rolodex/internal/repository"
 	"github.com/Sun-Wukhan/rolodex/internal/repository/postgres"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/replica"
 	"github.com/Sun-Wukhan/rolodex/internal/repository/repositorytest"
 	"github.com/Sun-Wukhan/rolodex/internal/repository/split"
 )
@@ -44,6 +46,42 @@ func TestPostgresContract(t *testing.T) {
 			t.Fatalf("truncate credentials: %v", err)
 		}
 		r := split.New(profiles, credentials)
+		t.Cleanup(func() { _ = r.Close() })
+		return r
+	})
+}
+
+// TestPostgresReplicaContract runs the contract through the read/write router.
+// The "replica" is a second, migration-free connection to the same database,
+// i.e. a replica with zero lag; lag and outages are covered by unit tests.
+func TestPostgresReplicaContract(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL not set; skipping PostgreSQL integration tests")
+	}
+	credentialsDSN := siblingDatabase(t, dsn, "_credentials")
+
+	repositorytest.Run(t, func(t *testing.T) repository.UserRepository {
+		ctx := context.Background()
+		primary, err := postgres.OpenProfiles(ctx, dsn)
+		if err != nil {
+			t.Fatalf("open profiles: %v", err)
+		}
+		rep, err := postgres.OpenProfilesReplica(dsn)
+		if err != nil {
+			t.Fatalf("open replica: %v", err)
+		}
+		credentials, err := postgres.OpenCredentials(ctx, credentialsDSN)
+		if err != nil {
+			t.Fatalf("open credentials: %v", err)
+		}
+		if _, err := primary.DB().ExecContext(ctx, `TRUNCATE users CASCADE`); err != nil {
+			t.Fatalf("truncate profiles: %v", err)
+		}
+		if _, err := credentials.DB().ExecContext(ctx, `TRUNCATE user_credentials`); err != nil {
+			t.Fatalf("truncate credentials: %v", err)
+		}
+		r := split.New(replica.New(primary, rep, slog.Default()), credentials)
 		t.Cleanup(func() { _ = r.Close() })
 		return r
 	})

@@ -41,6 +41,11 @@ numbers and addresses; the credentials database (`CREDENTIALS_DATABASE_URL`,
 Kubernetes they are separate PostgreSQL servers; locally they are two SQLite files. See
 [Database design](#database-design).
 
+Profile reads and writes are split: writes go to the profiles primary and reads
+(search, profile views) go to a read-only streaming replica (`DATABASE_READ_URL`),
+falling back to the primary when the replica lags or is down. See
+[Read/write split](docs/DESIGN.md#readwrite-split-for-profiles).
+
 The REST API uses short-lived HS256 bearer JWTs issued by `POST /api/v1/auth/login`.
 ABC and XYC are treated as interchangeable implementations of an `IdentityProvider`
 interface. Their `/auth` + `/identity` contract is treated as an external contract we
@@ -106,8 +111,9 @@ available as `make run-mock`, `make seed-local`, `make run-api` and `make web`.
 ### Docker Compose
 
 `make up` builds one distroless image for the three Go binaries plus an nginx image for
-the UI, and starts two PostgreSQL servers (`postgres` for profiles, `credentials-db`
-for credentials), the mock vendors, a one-shot seed job, the API and the web app. `make logs` tails the API, `make down` removes everything including data.
+the UI, and starts three PostgreSQL servers (`postgres` for profile writes, its
+streaming replica `postgres-replica` for profile reads, and `credentials-db` for
+credentials), the mock vendors, a one-shot seed job, the API and the web app. `make logs` tails the API, `make down` removes everything including data.
 
 | Service      | URL                      | Notes                                 |
 | ------------ | ------------------------ | ------------------------------------- |
@@ -126,9 +132,10 @@ make k8s-down      # deletes the rolodex namespace
 
 Manifests live in [`deploy/k8s`](deploy/k8s) (plain YAML composed with kustomize):
 
-- Two **PostgreSQL** StatefulSets, `postgres` (profiles) and `credentials-db`
-  (credentials), each with its own account, 1Gi PersistentVolumeClaim and readiness
-  probe.
+- Three **PostgreSQL** StatefulSets, each with a 1Gi PersistentVolumeClaim and
+  readiness probe: `postgres` (profiles primary, takes writes), `postgres-replica`
+  (hot standby that streams from the primary and serves profile reads) and
+  `credentials-db` (credentials, its own account).
 - **API** Deployment with 2 replicas, `/readyz` readiness and `/healthz` liveness
   probes. Migrations take a PostgreSQL advisory lock, so replicas starting together
   never race.
@@ -312,7 +319,7 @@ frontend/src/
 ## Database design
 
 ```
-profiles database (DATABASE_URL)
+profiles database (DATABASE_URL; read replica at DATABASE_READ_URL)
   users            (id PK, created_at, updated_at)
   user_profiles    (user_id PK/FK -> users, name, phone E.164, street_address,
                     locality, region, postal_code, country)          1:1

@@ -49,6 +49,8 @@ spec:
               value: postgres
             - name: DATABASE_URL
               value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres:5432/$(POSTGRES_DB)?sslmode=disable
+            - name: DATABASE_READ_URL
+              value: postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@postgres-replica:5432/$(POSTGRES_DB)?sslmode=disable
             - name: CREDENTIALS_DB_USER
               valueFrom: { secretKeyRef: { name: rolodex-env, key: CREDENTIALS_DB_USER } }
             - name: CREDENTIALS_DB_PASSWORD

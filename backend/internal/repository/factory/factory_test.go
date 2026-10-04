@@ -26,6 +26,20 @@ func TestOpenRejectsSharedOrMissingDatabase(t *testing.T) {
 	}
 }
 
+func TestOpenRejectsInvalidReplica(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	profiles, credentials := filepath.Join(dir, "p.db"), filepath.Join(dir, "c.db")
+	if _, err := factory.Open(ctx, factory.DriverSQLite, profiles, credentials,
+		factory.WithProfilesReplica(filepath.Join(dir, "r.db"), nil)); err == nil {
+		t.Error("sqlite replica: expected error")
+	}
+	if _, err := factory.Open(ctx, factory.DriverPostgres, "postgres://h/p", "postgres://h/c",
+		factory.WithProfilesReplica("postgres://h/p", nil)); err == nil {
+		t.Error("replica equal to primary: expected error")
+	}
+}
+
 func TestOpenSQLiteKeepsCredentialsInSeparateFile(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

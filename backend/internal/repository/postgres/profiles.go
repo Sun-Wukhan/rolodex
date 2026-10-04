@@ -29,6 +29,20 @@ func OpenProfiles(ctx context.Context, dsn string) (*ProfileStore, error) {
 	return &ProfileStore{db: db}, nil
 }
 
+// OpenProfilesReplica connects to a read-only streaming replica of the
+// profiles database. It applies no migrations (a standby cannot be written
+// to and receives the primary's schema through replication), and only its
+// read methods are meant to be used. The connection is lazy so that an
+// unreachable replica degrades reads to the primary instead of failing
+// startup.
+func OpenProfilesReplica(dsn string) (*ProfileStore, error) {
+	db, err := pool(dsn, "profiles replica")
+	if err != nil {
+		return nil, err
+	}
+	return &ProfileStore{db: db}, nil
+}
+
 // DB exposes the underlying pool (used by tests for cleanup).
 func (s *ProfileStore) DB() *sql.DB { return s.db }
 

@@ -191,3 +191,40 @@ flowchart LR
   to obtain and are refreshed proactively.
 - Search would move to trigram indexes or a search engine if substring matching over
   large datasets became a requirement.
+
+### Read/write split for profiles
+
+Profile traffic is read-heavy (search, profile views), so the profiles database runs
+as a primary plus a read-only **streaming replica** (hot standby). This is CQRS at
+the storage level: commands go to the primary, queries go to the replica; the model
+and SQL are shared because both sides have the same schema.
+
+```mermaid
+flowchart LR
+  api[API] -- "CreateUser / DeleteUser" --> primary[(postgres<br/>primary)]
+  api -- "GetProfile / SearchProfiles" --> replica[(postgres-replica<br/>hot standby)]
+  primary -- "WAL streaming (async)" --> replica
+  api -- "credentials (reads + writes)" --> creds[(credentials-db)]
+```
+
+- The routing lives in `internal/repository/replica`, a `ProfileStore` that wraps a
+  primary and a replica store. It is enabled by setting `DATABASE_READ_URL`; when
+  unset, everything uses the primary as before. Services and handlers are unchanged.
+- Replication is asynchronous, so the replica can lag by a few milliseconds.
+  `GetProfile` retries a miss on the primary, which gives read-your-writes for the
+  "create a user, then open the profile" flow. A search may briefly miss a user created
+  a moment ago; that is the accepted trade-off.
+- If the replica is down or not yet bootstrapped, reads fall back to the primary and
+  a warning is logged. `/readyz` only checks the primary, so a lost replica degrades
+  capacity rather than availability. The replica connection is lazy, so the API also
+  starts without it.
+- The replica bootstraps itself with `pg_basebackup` from the primary on first start
+  and follows it over a dedicated `REPLICATION_USER` account
+  ([`deploy/k8s/postgres`](../deploy/k8s/postgres)). The primary keeps 256 MB of WAL
+  (`wal_keep_size`) so a briefly offline replica can catch up without a re-clone.
+  A replication slot would guarantee that, at the risk of filling the primary's disk
+  if the replica disappears.
+- The credentials database stays on a single primary: login has to see a password
+  change immediately, and its load is small.
+- More replicas can be added behind the `postgres-replica` Service. In production a
+  managed service (Cloud SQL read replicas) would replace the hand-rolled standby.

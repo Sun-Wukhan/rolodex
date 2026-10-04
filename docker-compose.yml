@@ -9,13 +9,41 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:?set in .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
       POSTGRES_DB: ${POSTGRES_DB:?set in .env}
+    command: ["postgres", "-c", "hba_file=/etc/rolodex/postgres/pg_hba.conf", "-c", "wal_keep_size=256MB"]
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./deploy/k8s/postgres:/etc/rolodex/postgres:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 2s
       timeout: 3s
       retries: 20
+
+  # Read-only hot standby of the profiles primary; serves profile reads.
+  postgres-replica:
+    image: postgres:16-alpine
+    user: "70:70"
+    entrypoint: ["sh", "/etc/rolodex/postgres/replica-entrypoint.sh"]
+    environment:
+      PRIMARY_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      REPLICATION_USER: ${REPLICATION_USER:?set in .env}
+      REPLICATION_PASSWORD: ${REPLICATION_PASSWORD}
+      PGDATA: /var/lib/postgresql/data/pgdata
+      HBA_FILE: /etc/rolodex/postgres/pg_hba.conf
+    volumes:
+      - pgdata-replica:/var/lib/postgresql/data
+      - ./deploy/k8s/postgres:/etc/rolodex/postgres:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
 
   # Separate server for usernames and password hashes, with its own account.
   credentials-db:
@@ -66,6 +94,7 @@ services:
       HTTP_ADDR: ":8080"
       DB_DRIVER: postgres
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      DATABASE_READ_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres-replica:5432/${POSTGRES_DB}?sslmode=disable
       CREDENTIALS_DATABASE_URL: postgres://${CREDENTIALS_DB_USER}:${CREDENTIALS_DB_PASSWORD}@credentials-db:5432/${CREDENTIALS_DB_NAME}?sslmode=disable
       JWT_SECRET: ${JWT_SECRET:?set in .env}
       CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:3000
@@ -82,6 +111,8 @@ services:
         condition: service_healthy
       credentials-db:
         condition: service_healthy
+      postgres-replica:
+        condition: service_started
       seed:
         condition: service_completed_successfully
       mockvendors:
@@ -99,4 +130,5 @@ services:
 
 volumes:
   pgdata:
+  pgdata-replica:
   credentials-data:

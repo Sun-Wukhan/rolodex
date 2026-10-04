@@ -1,11 +1,14 @@
+# Read-only streaming replica (hot standby) of the profiles primary. The API
+# sends profile reads here and writes to the primary; see
+# internal/repository/replica.
 apiVersion: v1
 kind: Service
 metadata:
-  name: postgres
-  labels: { app.kubernetes.io/name: postgres }
+  name: postgres-replica
+  labels: { app.kubernetes.io/name: postgres-replica }
 spec:
   clusterIP: None
-  selector: { app.kubernetes.io/name: postgres }
+  selector: { app.kubernetes.io/name: postgres-replica }
   ports:
     - name: postgres
       port: 5432
@@ -13,19 +16,18 @@ spec:
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: postgres
-  labels: { app.kubernetes.io/name: postgres }
+  name: postgres-replica
+  labels: { app.kubernetes.io/name: postgres-replica }
 spec:
-  serviceName: postgres
+  serviceName: postgres-replica
   replicas: 1
   selector:
-    matchLabels: { app.kubernetes.io/name: postgres }
+    matchLabels: { app.kubernetes.io/name: postgres-replica }
   template:
     metadata:
-      labels: { app.kubernetes.io/name: postgres }
+      labels: { app.kubernetes.io/name: postgres-replica }
     spec:
       automountServiceAccountToken: false
-      # postgres:alpine's "postgres" user is UID/GID 70; fsGroup makes the volume writable.
       securityContext:
         runAsNonRoot: true
         runAsUser: 70
@@ -35,18 +37,26 @@ spec:
       containers:
         - name: postgres
           image: postgres:16-alpine
-          args: ["-c", "hba_file=/etc/rolodex/postgres/pg_hba.conf", "-c", "wal_keep_size=256MB"]
+          command: ["sh", "/etc/rolodex/postgres/replica-entrypoint.sh"]
           ports:
             - containerPort: 5432
           env:
+            - name: PRIMARY_HOST
+              value: postgres
             - name: POSTGRES_USER
               valueFrom: { secretKeyRef: { name: rolodex-env, key: POSTGRES_USER } }
             - name: POSTGRES_PASSWORD
               valueFrom: { secretKeyRef: { name: rolodex-env, key: POSTGRES_PASSWORD } }
             - name: POSTGRES_DB
               valueFrom: { secretKeyRef: { name: rolodex-env, key: POSTGRES_DB } }
+            - name: REPLICATION_USER
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: REPLICATION_USER } }
+            - name: REPLICATION_PASSWORD
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: REPLICATION_PASSWORD } }
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+            - name: HBA_FILE
+              value: /etc/rolodex/postgres/pg_hba.conf
           readinessProbe:
             exec:
               command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
@@ -58,17 +68,16 @@ spec:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
-          # Besides PGDATA, postgres writes its socket/lock files and temp files.
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+            - name: config
+              mountPath: /etc/rolodex/postgres
+              readOnly: true
             - name: run
               mountPath: /var/run/postgresql
             - name: tmp
               mountPath: /tmp
-            - name: config
-              mountPath: /etc/rolodex/postgres
-              readOnly: true
       volumes:
         - name: config
           configMap: { name: postgres-replication }

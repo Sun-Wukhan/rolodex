@@ -78,6 +78,7 @@ k8s-up: env ## Start minikube if needed, build images, deploy everything and wai
 	@$(MINIKUBE) status >/dev/null 2>&1 || $(MINIKUBE) start --cpus=2 --memory=3072
 	$(MAKE) k8s-images k8s-secret k8s-apply
 	$(KUBECTL) rollout status statefulset/postgres --timeout=180s
+	$(KUBECTL) rollout status statefulset/postgres-replica --timeout=180s
 	$(KUBECTL) rollout status statefulset/credentials-db --timeout=180s
 	$(KUBECTL) wait --for=condition=complete job/seed --timeout=180s
 	$(KUBECTL) rollout status deployment/mockvendors --timeout=120s
