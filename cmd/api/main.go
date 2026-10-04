@@ -42,12 +42,12 @@ func run() error {
 
 	startCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	repo, err := factory.Open(startCtx, cfg.DBDriver, cfg.DatabaseURL)
+	repo, err := factory.Open(startCtx, cfg.DBDriver, cfg.DatabaseURL, cfg.CredentialsDBURL)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = repo.Close() }()
-	log.Info("datastore ready", "driver", cfg.DBDriver)
+	log.Info("datastores ready", "driver", cfg.DBDriver, "databases", []string{"profiles", "credentials"})
 
 	hasher := security.NewArgon2Hasher(security.DefaultArgon2Params())
 	tokens, err := security.NewTokenManager(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTTTL)

@@ -18,7 +18,7 @@ import (
 	"github.com/Sun-Wukhan/rolodex/internal/domain"
 	"github.com/Sun-Wukhan/rolodex/internal/httpapi"
 	"github.com/Sun-Wukhan/rolodex/internal/provider"
-	"github.com/Sun-Wukhan/rolodex/internal/repository/sqlite"
+	"github.com/Sun-Wukhan/rolodex/internal/repository/factory"
 	"github.com/Sun-Wukhan/rolodex/internal/security"
 	"github.com/Sun-Wukhan/rolodex/internal/service"
 )
@@ -43,7 +43,8 @@ func setup(t *testing.T, ready httpapi.Pinger) *env {
 	t.Helper()
 	ctx := context.Background()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	repo, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "api.db"))
+	dir := t.TempDir()
+	repo, err := factory.Open(ctx, factory.DriverSQLite, filepath.Join(dir, "profiles.db"), filepath.Join(dir, "credentials.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

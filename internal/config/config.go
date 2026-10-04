@@ -27,6 +27,7 @@ type Config struct {
 	HTTPAddr            string
 	DBDriver            string
 	DatabaseURL         string
+	CredentialsDBURL    string
 	JWTSecret           []byte
 	JWTIssuer           string
 	JWTTTL              time.Duration
@@ -70,6 +71,7 @@ func load(getenv func(string) string) (Config, error) {
 		HTTPAddr:            get("HTTP_ADDR", ":8080"),
 		DBDriver:            get("DB_DRIVER", "sqlite"),
 		DatabaseURL:         get("DATABASE_URL", "rolodex.db"),
+		CredentialsDBURL:    get("CREDENTIALS_DATABASE_URL", "rolodex-credentials.db"),
 		JWTSecret:           []byte(get("JWT_SECRET", "")),
 		JWTIssuer:           get("JWT_ISSUER", "rolodex"),
 		JWTTTL:              dur("JWT_TTL", 15*time.Minute),
@@ -95,6 +97,12 @@ func load(getenv func(string) string) (Config, error) {
 	}
 	if cfg.DBDriver != "postgres" && cfg.DBDriver != "sqlite" {
 		errs = append(errs, fmt.Errorf("DB_DRIVER: must be postgres or sqlite, got %q", cfg.DBDriver))
+	}
+	if cfg.DBDriver == "postgres" && (get("DATABASE_URL", "") == "" || get("CREDENTIALS_DATABASE_URL", "") == "") {
+		errs = append(errs, errors.New("DATABASE_URL and CREDENTIALS_DATABASE_URL: both required with DB_DRIVER=postgres"))
+	}
+	if cfg.DatabaseURL == cfg.CredentialsDBURL {
+		errs = append(errs, errors.New("CREDENTIALS_DATABASE_URL: must point at a different database than DATABASE_URL"))
 	}
 	for name, p := range map[string]ProviderConfig{"ABC": cfg.ABC, "XYC": cfg.XYC} {
 		if p.Enabled() && (p.Username == "" || p.Password == "") {

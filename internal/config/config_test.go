@@ -46,3 +46,26 @@ func TestLoadValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadCredentialsDatabase(t *testing.T) {
+	secret := strings.Repeat("k", 32)
+	cfg, err := load(env(map[string]string{"JWT_SECRET": secret}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseURL == cfg.CredentialsDBURL {
+		t.Fatalf("sqlite defaults share a file: %q", cfg.DatabaseURL)
+	}
+
+	cases := map[string]map[string]string{
+		"postgres needs both URLs": {"JWT_SECRET": secret, "DB_DRIVER": "postgres", "DATABASE_URL": "postgres://p/profiles"},
+		"same database rejected": {
+			"JWT_SECRET": secret, "DATABASE_URL": "postgres://p/db", "CREDENTIALS_DATABASE_URL": "postgres://p/db",
+		},
+	}
+	for name, vars := range cases {
+		if _, err := load(env(vars)); err == nil || !strings.Contains(err.Error(), "CREDENTIALS_DATABASE_URL") {
+			t.Errorf("%s: want CREDENTIALS_DATABASE_URL error, got %v", name, err)
+		}
+	}
+}

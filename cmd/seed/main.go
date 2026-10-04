@@ -31,10 +31,11 @@ func run(log *slog.Logger) error {
 	}
 	driver := getenv("DB_DRIVER", "sqlite")
 	dsn := getenv("DATABASE_URL", "rolodex.db")
+	credentialsDSN := getenv("CREDENTIALS_DATABASE_URL", "rolodex-credentials.db")
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	repo, err := factory.Open(ctx, driver, dsn)
+	repo, err := factory.Open(ctx, driver, dsn, credentialsDSN)
 	if err != nil {
 		return err
 	}
