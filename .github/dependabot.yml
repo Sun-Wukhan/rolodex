@@ -1,9 +1,13 @@
 version: 2
+# cooldown delays adopting freshly published releases, a common window for
+# compromised packages to be discovered and yanked.
 updates:
   - package-ecosystem: gomod
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
     groups:
@@ -11,9 +15,11 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: npm
-    directory: /web
+    directories: [/web, /e2e]
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"
     groups:
@@ -24,12 +30,19 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(ci)"
+    groups:
+      actions:
+        patterns: ["*"]
 
   - package-ecosystem: docker
     directories: [/, /web]
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "chore(deps)"

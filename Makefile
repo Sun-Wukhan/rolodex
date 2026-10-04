@@ -10,10 +10,17 @@ K8S_NS := rolodex
 MINIKUBE_PROFILE ?= rolodex
 MINIKUBE := minikube -p $(MINIKUBE_PROFILE)
 KUBECTL := kubectl --context $(MINIKUBE_PROFILE) -n $(K8S_NS)
+# Scanner versions match .github/workflows/security.yml.
+SEMGREP_IMAGE ?= semgrep/semgrep:1.140.0
+GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1
+TRIVY_IMAGE ?= aquasec/trivy:0.75.0
+# Seeded account password for post-deploy tests, read from .env.
+SEED_PASSWORD = $$(sed -n 's/^SEED_PASSWORD=//p' .env)
 
 .PHONY: help env dev run-mock seed-local run-api web up down logs \
 	k8s-up k8s-images k8s-secret k8s-apply k8s-forward k8s-status k8s-logs k8s-down \
-	test pg-up pg-down test-pg cover lint vuln fmt ci web-test
+	test pg-up pg-down test-pg cover lint vuln fmt ci web-test \
+	sast smoke e2e dast
 
 help: ## Show available targets
 	@awk 'BEGIN {FS = ":.*?## "} /^##@/ {printf "\n\033[1m%s\033[0m\n", substr($$0, 5)} /^[a-zA-Z0-9_-]+:.*?## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -132,3 +139,26 @@ web-test: ## Run frontend lint, typecheck and tests with coverage
 	cd web && npm run lint && npm run typecheck && npm run test:coverage
 
 ci: lint cover vuln web-test ## Run the CI checks locally
+
+##@ Security and post-deploy tests (needs Docker; smoke/e2e/dast need a running stack)
+
+sast: ## Static analysis: Semgrep, Gitleaks (git history) and Trivy (deps, IaC, secrets)
+	docker run --rm -v "$$PWD:/src" -w /src $(SEMGREP_IMAGE) semgrep scan --metrics=off --error \
+		--config p/default --config p/golang --config p/typescript --config p/react --config p/secrets \
+		--config p/dockerfile --config p/kubernetes --config p/github-actions \
+		--exclude node_modules --exclude dist --severity ERROR
+	docker run --rm -v "$$PWD:/repo" -w /repo $(GITLEAKS_IMAGE) git --redact --no-banner .
+	docker run --rm -v "$$PWD:/src" -v rolodex-trivy-cache:/root/.cache -w /src $(TRIVY_IMAGE) fs --quiet \
+		--timeout 15m --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
+		--skip-dirs web/node_modules --skip-dirs e2e/node_modules --skip-dirs bin --skip-dirs web/dist \
+		--skip-files .env .
+
+smoke: env ## API + web smoke test against localhost:8080/:3000 (make up, or make k8s-forward)
+	SMOKE_PASSWORD="$(SEED_PASSWORD)" WEB_URL=http://localhost:3000 ./scripts/smoke-test.sh
+
+e2e: env ## Playwright browser tests against http://localhost:3000 (BASE_URL=... to override)
+	cd e2e && npm ci && npx playwright install chromium
+	cd e2e && E2E_PASSWORD="$(SEED_PASSWORD)" BASE_URL="$${BASE_URL:-http://localhost:3000}" npx playwright test
+
+dast: env ## OWASP ZAP API (authenticated) + web baseline scans against localhost (several minutes)
+	DAST_PASSWORD="$(SEED_PASSWORD)" ./scripts/dast.sh

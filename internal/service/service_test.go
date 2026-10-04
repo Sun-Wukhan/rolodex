@@ -54,6 +54,39 @@ func TestCreateUserValidation(t *testing.T) {
 	}
 }
 
+func TestRejectsControlCharactersAndInvalidUTF8(t *testing.T) {
+	repo := newMemRepo()
+	svc := NewProfileService(repo, plainHasher{})
+
+	for _, bad := range []string{"Ada\x00", "Ada\xff", "Ada\nLovelace"} {
+		in := validInput()
+		in.Name = bad
+		in.Address.Locality = bad
+		_, err := svc.CreateUser(context.Background(), in)
+		var ve *ValidationError
+		if !errors.As(err, &ve) || ve.Fields["name"] == "" || ve.Fields["address.locality"] == "" {
+			t.Errorf("CreateUser(name=%q) = %v, want name and locality errors", bad, err)
+		}
+		for _, q := range []domain.SearchQuery{{Name: bad}, {Username: bad}, {Phone: bad}} {
+			if _, err := svc.Search(context.Background(), q); !errors.Is(err, domain.ErrInvalidInput) {
+				t.Errorf("Search(%+v) = %v, want ErrInvalidInput", q, err)
+			}
+		}
+	}
+	if len(repo.profiles) != 0 {
+		t.Fatalf("invalid input reached the repository: %d profiles", len(repo.profiles))
+	}
+
+	auth, err := NewAuthService(repo, plainHasher{}, fakeIssuer{}, discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo.failWith = errors.New("repository must not be queried")
+	if _, err := auth.Login(context.Background(), "ada\x00", "a-long-password"); !errors.Is(err, domain.ErrUnauthorized) {
+		t.Fatalf("Login with NUL username = %v, want ErrUnauthorized", err)
+	}
+}
+
 func TestSearchRequiresFilterAndNormalisesPhone(t *testing.T) {
 	repo := newMemRepo()
 	svc := NewProfileService(repo, plainHasher{})

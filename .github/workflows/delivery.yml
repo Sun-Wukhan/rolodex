@@ -1,0 +1,496 @@
+name: Delivery
+
+# CI/CD pipeline for main:
+#
+#   SAST ─┐
+#         ├─ build, scan, sign ─ staging (deploy, smoke, e2e, DAST) ─ production ─ verify ─┐
+#   CI  ──┘                                                            (rollback on fail) ├─ notify
+#
+# Every stage gates the next. The notify job always runs and routes a
+# (simulated) email to the right people depending on what happened.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - docs/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Never cancel a deployment half-way; queue the next one instead.
+concurrency:
+  group: delivery-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sast:
+    name: SAST
+    uses: ./.github/workflows/security.yml
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
+      pull-requests: write
+
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build ${{ matrix.image }} image
+    needs: [sast, ci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      matrix:
+        include:
+          - image: api
+            context: .
+            build-args: ""
+          - image: web
+            context: web
+            # Staging port-forwards the API to localhost:8080 on the runner.
+            build-args: VITE_API_URL=http://localhost:8080
+    env:
+      TRIVY_IMAGE: aquasec/trivy:0.75.0
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Image name
+        id: name
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/rolodex-${{ matrix.image }}"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+          echo "ref=${repo}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: ${{ matrix.context }}
+          build-args: ${{ matrix.build-args }}
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.name.outputs.ref }}
+            ${{ steps.name.outputs.repo }}:main
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
+
+      - name: Vulnerability scan (fail on fixable HIGH/CRITICAL)
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.name.outputs.repo }}@${{ steps.push.outputs.digest }}
+        run: |
+          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD "$TRIVY_IMAGE" image --quiet \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 "$IMAGE"
+
+      - name: Generate SBOM (SPDX)
+        env:
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.name.outputs.repo }}@${{ steps.push.outputs.digest }}
+        run: |
+          docker run --rm -e TRIVY_USERNAME -e TRIVY_PASSWORD -v "$PWD:/out" "$TRIVY_IMAGE" image --quiet \
+            --format spdx-json --output "/out/sbom-${{ matrix.image }}.spdx.json" "$IMAGE"
+
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ steps.name.outputs.repo }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ steps.name.outputs.repo }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom-${{ matrix.image }}.spdx.json
+          push-to-registry: true
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sbom-${{ matrix.image }}
+          path: sbom-${{ matrix.image }}.spdx.json
+          retention-days: 30
+
+      - name: Summary
+        env:
+          REF: ${{ steps.name.outputs.ref }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          {
+            echo "### Image: ${{ matrix.image }}"
+            echo
+            echo "- \`${REF}\`"
+            echo "- digest \`${DIGEST}\`"
+            echo "- verify: \`gh attestation verify oci://${REF} --repo ${GITHUB_REPOSITORY}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  staging:
+    name: Staging (deploy, smoke, e2e, DAST)
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: staging
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      deploy: ${{ steps.outcomes.outputs.deploy }}
+      smoke: ${{ steps.outcomes.outputs.smoke }}
+      e2e: ${{ steps.outcomes.outputs.e2e }}
+      dast: ${{ steps.outcomes.outputs.dast }}
+    env:
+      API_URL: http://localhost:8080
+      WEB_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Create ephemeral Kubernetes cluster (kind)
+        uses: helm/kind-action@06c1ae10762d3b9c1644e7fe69596ae519e015a2 # v1.15.0
+        with:
+          cluster_name: rolodex
+
+      - name: Load the images built for this commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          prefix="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker pull "${prefix}/rolodex-api:${GITHUB_SHA}"
+          docker pull "${prefix}/rolodex-web:${GITHUB_SHA}"
+          # The manifests reference these local tags with imagePullPolicy: Never.
+          docker tag "${prefix}/rolodex-api:${GITHUB_SHA}" rolodex:local
+          docker tag "${prefix}/rolodex-web:${GITHUB_SHA}" rolodex-web:local
+          kind load docker-image --name rolodex rolodex:local rolodex-web:local
+
+      - name: Generate throwaway credentials
+        run: |
+          # Fresh random values per run: nothing is stored or reused.
+          rand() { openssl rand -hex "$1"; }
+          seed="$(rand 16)"
+          db="$(rand 24)"
+          jwt="$(rand 32)"
+          abc="$(rand 24)"
+          xyc="$(rand 24)"
+          for v in "$seed" "$db" "$jwt" "$abc" "$xyc"; do echo "::add-mask::$v"; done
+          umask 077
+          cat > .env <<EOF
+          POSTGRES_USER=rolodex
+          POSTGRES_PASSWORD=${db}
+          POSTGRES_DB=rolodex
+          JWT_SECRET=${jwt}
+          SEED_PASSWORD=${seed}
+          ABC_USERNAME=rolodex-abc
+          ABC_PASSWORD=${abc}
+          XYC_USERNAME=rolodex-xyc
+          XYC_PASSWORD=${xyc}
+          XYC_FAILURE_RATE=0.3
+          EOF
+          echo "SEED_PASSWORD=${seed}" >> "$GITHUB_ENV"
+
+      - name: Deploy
+        id: deploy
+        run: |
+          make k8s-secret k8s-apply MINIKUBE_PROFILE=kind-rolodex
+          # Smoke, e2e and DAST all sign in from one IP within a minute; the
+          # limiter itself is covered by unit tests.
+          kubectl -n rolodex set env deployment/api LOGIN_RATE_PER_MINUTE=120
+          kubectl -n rolodex rollout status statefulset/postgres --timeout=180s
+          kubectl -n rolodex wait --for=condition=complete job/seed --timeout=180s
+          kubectl -n rolodex rollout status deployment/mockvendors --timeout=120s
+          kubectl -n rolodex rollout status deployment/api --timeout=180s
+          kubectl -n rolodex rollout status deployment/web --timeout=120s
+
+      - name: Expose services on the runner
+        run: |
+          nohup kubectl -n rolodex port-forward svc/api 8080:8080 > /tmp/pf-api.log 2>&1 &
+          nohup kubectl -n rolodex port-forward svc/web 3000:8080 > /tmp/pf-web.log 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -fsS -o /dev/null "$API_URL/healthz" && curl -fsS -o /dev/null "$WEB_URL/" && exit 0
+            sleep 2
+          done
+          cat /tmp/pf-*.log
+          exit 1
+
+      - name: Smoke test (API + web)
+        id: smoke
+        run: SMOKE_PASSWORD="$SEED_PASSWORD" scripts/smoke-test.sh
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install Playwright
+        if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: End-to-end tests (Playwright)
+        id: e2e
+        if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}
+        working-directory: e2e
+        env:
+          BASE_URL: ${{ env.WEB_URL }}
+        run: E2E_PASSWORD="$SEED_PASSWORD" npx playwright test
+
+      - name: DAST (OWASP ZAP API + baseline)
+        id: dast
+        if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}
+        run: DAST_PASSWORD="$SEED_PASSWORD" scripts/dast.sh
+
+      - name: Record stage outcomes
+        id: outcomes
+        if: always()
+        run: |
+          {
+            echo "deploy=${{ steps.deploy.outcome }}"
+            echo "smoke=${{ steps.smoke.outcome }}"
+            echo "e2e=${{ steps.e2e.outcome }}"
+            echo "dast=${{ steps.dast.outcome }}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Collect cluster diagnostics
+        if: failure()
+        run: |
+          mkdir -p diagnostics
+          kubectl -n rolodex get all,events -o wide > diagnostics/resources.txt 2>&1 || true
+          kubectl -n rolodex describe pods > diagnostics/pods.txt 2>&1 || true
+          for app in api web mockvendors postgres; do
+            kubectl -n rolodex logs -l "app.kubernetes.io/name=${app}" --all-containers --prefix --tail=500 \
+              > "diagnostics/${app}.log" 2>&1 || true
+          done
+          cp /tmp/pf-*.log diagnostics/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: staging-reports
+          path: |
+            e2e/playwright-report
+            e2e/results.xml
+            dast-reports
+            diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
+
+  production:
+    name: Production
+    needs: staging
+    uses: ./.github/workflows/pages.yml
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+  verify-production:
+    name: Verify production (e2e)
+    needs: production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BASE_URL: ${{ needs.production.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Wait for the CDN to serve the new build
+        run: |
+          for _ in $(seq 1 30); do
+            curl -fsS -o /dev/null "$BASE_URL" && exit 0
+            sleep 5
+          done
+          echo "::error::${BASE_URL} did not respond with 200"
+          exit 1
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version-file: web/.nvmrc
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: End-to-end tests against production
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: production-e2e-report
+          path: e2e/playwright-report
+          if-no-files-found: ignore
+          retention-days: 14
+
+  rollback:
+    name: Rollback (simulated)
+    needs: [production, verify-production]
+    if: failure() && needs.production.result == 'success' && needs.verify-production.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Find the last good release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          last_good="$(gh run list -R "$GITHUB_REPOSITORY" --workflow delivery.yml --branch main \
+            --status success --limit 1 --json headSha --jq '.[0].headSha // empty')"
+          {
+            echo "### Rollback (simulated)"
+            echo
+            if [[ -n "$last_good" ]]; then
+              echo "Production failed verification. A real rollback would redeploy \`${last_good}\`:"
+              echo
+              echo "\`\`\`"
+              echo "gh workflow run pages.yml --ref ${last_good}"
+              echo "\`\`\`"
+            else
+              echo "Production failed verification and no earlier successful release exists."
+            fi
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  notify:
+    name: Notify
+    needs: [sast, ci, build, staging, production, verify-production, rollback]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send notifications (simulated email)
+        env:
+          RESULT_SAST: ${{ needs.sast.result }}
+          RESULT_CI: ${{ needs.ci.result }}
+          RESULT_BUILD: ${{ needs.build.result }}
+          RESULT_STAGING: ${{ needs.staging.result }}
+          RESULT_DEPLOY: ${{ needs.staging.outputs.deploy }}
+          RESULT_SMOKE: ${{ needs.staging.outputs.smoke }}
+          RESULT_E2E: ${{ needs.staging.outputs.e2e }}
+          RESULT_DAST: ${{ needs.staging.outputs.dast }}
+          RESULT_PRODUCTION: ${{ needs.production.result }}
+          RESULT_VERIFY: ${{ needs.verify-production.result }}
+          RESULT_ROLLBACK: ${{ needs.rollback.result }}
+          PAGE_URL: ${{ needs.production.outputs.page_url }}
+          # Distribution lists come from repository variables, with placeholders.
+          NOTIFY_RELEASE: ${{ vars.NOTIFY_RELEASE || 'release-managers@rolodex.example' }}
+          NOTIFY_SECURITY: ${{ vars.NOTIFY_SECURITY || 'security-team@rolodex.example' }}
+          NOTIFY_ONCALL: ${{ vars.NOTIFY_ONCALL || 'oncall@rolodex.example' }}
+          # Untrusted commit metadata is only ever read from the environment.
+          AUTHOR_EMAIL: ${{ github.event.head_commit.author.email || format('{0}@users.noreply.github.com', github.actor) }}
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || 'manual run' }}
+          COMMIT_TIME: ${{ github.event.head_commit.timestamp }}
+        run: |
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          commit_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          security_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/security/code-scanning"
+          short_sha="${GITHUB_SHA:0:7}"
+          subject_line="$(printf '%s' "$COMMIT_MESSAGE" | head -n 1 | cut -c1-100)"
+
+          lead_time="n/a"
+          if [[ -n "$COMMIT_TIME" ]] && committed="$(date -d "$COMMIT_TIME" +%s 2>/dev/null)"; then
+            lead_time="$(( ($(date +%s) - committed) / 60 )) min"
+          fi
+
+          stage_table() {
+            printf '  %-28s %s\n' \
+              "SAST" "$RESULT_SAST" \
+              "CI (tests, lint, coverage)" "$RESULT_CI" \
+              "Build, scan, sign images" "$RESULT_BUILD" \
+              "Staging deploy" "${RESULT_DEPLOY:-skipped}" \
+              "Staging smoke test" "${RESULT_SMOKE:-skipped}" \
+              "Staging e2e (Playwright)" "${RESULT_E2E:-skipped}" \
+              "Staging DAST (ZAP)" "${RESULT_DAST:-skipped}" \
+              "Production deploy" "$RESULT_PRODUCTION" \
+              "Production e2e" "$RESULT_VERIFY" \
+              "Rollback" "$RESULT_ROLLBACK"
+          }
+
+          # send_email TO CC SUBJECT INTRO - prints the message an SMTP step
+          # (e.g. dawidd6/action-send-mail) would send, and adds it to the summary.
+          send_email() {
+            local to="$1" cc="$2" subject="$3" intro="$4" message
+            message="$(cat <<EOF
+          From:    Rolodex CI/CD <cicd@rolodex.example>
+          To:      ${to}
+          Cc:      ${cc}
+          Subject: ${subject}
+
+          ${intro}
+
+          Commit:    ${short_sha} - ${subject_line}
+          Author:    ${AUTHOR_EMAIL}
+          Lead time: ${lead_time} (commit to notification)
+
+          Stages:
+          $(stage_table)
+
+          Run:        ${run_url}
+          Commit:     ${commit_url}
+          Security:   ${security_url}
+          Production: ${PAGE_URL:-not deployed}
+          EOF
+          )"
+            echo "==================== SIMULATED EMAIL ===================="
+            printf '%s\n' "$message"
+            echo "=========================================================="
+            {
+              echo "### 📧 ${subject}"
+              echo
+              echo '```'
+              printf '%s\n' "$message"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          sent=0
+          if [[ "$RESULT_SAST" == "failure" || "$RESULT_DAST" == "failure" ]]; then
+            send_email "$NOTIFY_SECURITY" "$AUTHOR_EMAIL" \
+              "[Rolodex][SECURITY] Security gate failed for ${short_sha}" \
+              "A security scan blocked this release. Review the findings in the Security tab and the DAST reports artifact."
+            sent=1
+          fi
+          if [[ "$RESULT_ROLLBACK" == "success" || "$RESULT_VERIFY" == "failure" ]]; then
+            send_email "$NOTIFY_ONCALL" "${NOTIFY_RELEASE}, ${AUTHOR_EMAIL}" \
+              "[Rolodex][P1] Production verification failed for ${short_sha}" \
+              "Production is serving a build that failed post-deployment tests. Rollback guidance is in the run summary."
+            sent=1
+          elif [[ "$RESULT_CI" == "failure" || "$RESULT_BUILD" == "failure" || "$RESULT_STAGING" == "failure" || "$RESULT_PRODUCTION" == "failure" ]] \
+            && [[ "$sent" == 0 ]]; then
+            send_email "$AUTHOR_EMAIL" "$NOTIFY_ONCALL" \
+              "[Rolodex] Delivery failed for ${short_sha}" \
+              "The pipeline stopped before production. Nothing was released; production still serves the previous version."
+            sent=1
+          fi
+          if [[ "$RESULT_VERIFY" == "success" ]]; then
+            send_email "$NOTIFY_RELEASE" "$AUTHOR_EMAIL" \
+              "[Rolodex] Released ${short_sha} to production" \
+              "All gates passed: SAST, tests, image scan, staging smoke/e2e/DAST and production verification."
+            sent=1
+          fi
+          if [[ "$sent" == 0 ]]; then
+            send_email "$AUTHOR_EMAIL" "" \
+              "[Rolodex] Delivery for ${short_sha} was cancelled" \
+              "The run was cancelled before completing; nothing new was released."
+          fi

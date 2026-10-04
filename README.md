@@ -1,6 +1,7 @@
 # Rolodex
 
-[![CI](https://github.com/Sun-Wukhan/rolodex/actions/workflows/ci.yml/badge.svg)](https://github.com/Sun-Wukhan/rolodex/actions/workflows/ci.yml)
+[![Delivery](https://github.com/Sun-Wukhan/rolodex/actions/workflows/delivery.yml/badge.svg)](https://github.com/Sun-Wukhan/rolodex/actions/workflows/delivery.yml)
+[![Security (SAST)](https://github.com/Sun-Wukhan/rolodex/actions/workflows/security.yml/badge.svg)](https://github.com/Sun-Wukhan/rolodex/actions/workflows/security.yml)
 [![Pages demo](https://github.com/Sun-Wukhan/rolodex/actions/workflows/pages.yml/badge.svg)](https://sun-wukhan.github.io/rolodex/)
 
 | | |
@@ -142,7 +143,8 @@ Rather than require a cloud account, the hosted site is a **demo build** of the 
 React app:
 
 - `pages.yml` builds `web/` with `VITE_DEMO_MODE=true` and deploys it to
-  https://sun-wukhan.github.io/rolodex/ on every push to `main` that touches `web/`.
+  https://sun-wukhan.github.io/rolodex/. It is the production stage of the
+  [delivery pipeline](#cicd-and-workflow), so it only runs after staging passed.
 - In demo mode the API client's `fetch` is swapped for an in-browser implementation of
   the Rolodex API ([`web/src/demo`](web/src/demo)). It mirrors the backend's
   validation, search semantics, phone normalisation and enrichment merge rules over the
@@ -292,8 +294,10 @@ user_credentials (id PK, user_id FK -> users, method, username, secret_hash NULL
 - **Tokens:** HS256 with a 32+ byte secret from the environment, algorithm pinned on
   verify (rejects `alg=none`/confusion), issuer and expiry required, 15 minute TTL.
 - **Input handling:** JSON bodies are size-limited and reject unknown fields and
-  trailing data; all inputs are validated and normalised in the service layer; SQL is
-  always parameterised and `LIKE` wildcards in user input are escaped.
+  trailing data; all inputs are validated and normalised in the service layer (including
+  rejecting control characters and invalid UTF-8, which DAST showed Postgres would
+  otherwise turn into a 500); SQL is always parameterised and `LIKE` wildcards in user
+  input are escaped.
 - **PII-safe logging:** the request logger records the route pattern, never the raw
   URL, so names and phone numbers in query strings never reach logs. Provider logs
   record status and latency only.
@@ -308,8 +312,12 @@ user_credentials (id PK, user_id FK -> users, method, username, secret_hash NULL
   `middleware.RealIP` trusts those headers blindly and is deliberately not used). Behind
   a load balancer, set `TRUSTED_PROXY_CIDRS` so `X-Forwarded-For` is only honoured
   through known proxies.
-- Security headers are set on every response; the container runs as non-root on a
-  distroless image; Postgres is not published to the host.
+- Security headers (CSP, CORP/COEP/COOP, `nosniff`, `frame-ancestors 'none'`,
+  Permissions-Policy) are set on every API and web response; containers run as numeric
+  non-root users with read-only root filesystems; Postgres is not published to the host.
+- **Supply chain:** every GitHub Action is pinned to a commit SHA, images are scanned
+  and shipped with an SBOM and signed SLSA provenance, and Dependabot waits 7 days
+  before adopting new releases.
 
 ### Third-party `/auth` contract
 
@@ -354,6 +362,13 @@ make test-pg   # also runs the contract suite against a throwaway PostgreSQL
 make cover     # coverage across internal/... on both databases, fails below 80% (currently ~88%)
 make ci        # gofmt, go vet, golangci-lint, coverage gate, govulncheck, frontend checks
 make pg-down   # stop the throwaway PostgreSQL container
+
+# Security and post-deploy checks (Docker required)
+make sast      # Semgrep, Gitleaks and Trivy, same versions as CI
+# against a running stack: `make up`, or `make k8s-up` + `make k8s-forward`
+make smoke     # 27 API and web checks (scripts/smoke-test.sh)
+make e2e       # Playwright browser tests (e2e/)
+make dast      # OWASP ZAP authenticated API scan + web baseline (scripts/dast.sh)
 ```
 
 - **Repository contract suite** (`repositorytest`): one set of behavioural tests run
@@ -371,17 +386,61 @@ make pg-down   # stop the throwaway PostgreSQL container
 
 ## CI/CD and workflow
 
-| Workflow | Trigger | What it enforces |
-| --- | --- | --- |
-| `ci.yml` backend | push to `main`, PRs | gofmt, `go vet`, golangci-lint (gosec, errorlint, revive, ...), race-enabled tests against SQLite **and** a PostgreSQL service container, 80% coverage gate, `govulncheck` |
-| `ci.yml` frontend | push to `main`, PRs | ESLint, Prettier check, `tsc`, Vitest coverage thresholds, `npm audit --audit-level=high`, production build |
-| `ci.yml` docker | after both pass | builds the API and web images (BuildKit cache) |
-| `pr-title.yml` | PRs | Conventional Commit PR titles (`feat:`, `fix:`, `chore:`, ...) so squash merges keep a clean history |
-| `release.yml` | push to `main` | release-please generates `CHANGELOG.md` and release PRs from commit messages |
+Pull requests run **CI** and **SAST**. Every merge to `main` runs the **Delivery**
+pipeline, where each stage gates the next:
 
-Dependabot (`.github/dependabot.yml`) opens weekly grouped updates for Go modules, npm,
-GitHub Actions and Docker base images. Workflows run with read-only `GITHUB_TOKEN`
-permissions except release-please, which needs to open PRs.
+```mermaid
+flowchart LR
+  SAST[SAST<br/>CodeQL · Semgrep<br/>Gitleaks · Trivy] --> B
+  CI[CI<br/>lint · tests · coverage] --> B
+  B[Build images<br/>Trivy scan · SBOM<br/>SLSA provenance] --> S
+  S[Staging on kind<br/>smoke · Playwright e2e<br/>ZAP DAST] --> P[Production<br/>GitHub Pages]
+  P --> V[Verify production<br/>Playwright e2e]
+  V -. fails .-> R[Rollback<br/>simulated]
+  V --> N[Notify<br/>simulated email]
+  R --> N
+```
+
+| Stage | Workflow | What it does |
+| --- | --- | --- |
+| **SAST** | `security.yml` (PRs, weekly, and Delivery) | CodeQL `security-extended` for Go and TypeScript; Semgrep (Go, TS/React, secrets, Dockerfile, Kubernetes, Actions rules) failing on ERROR severity; Gitleaks over full git history; Trivy for dependency CVEs, Dockerfile/Kubernetes misconfigurations and secrets, failing on fixable HIGH/CRITICAL; dependency review on PRs. All results go to **Security > Code scanning** as SARIF |
+| **CI** | `ci.yml` (PRs, and Delivery) | gofmt, `go vet`, golangci-lint, race-enabled tests on SQLite **and** PostgreSQL, 80% coverage gate, `govulncheck`; ESLint, Prettier, `tsc`, Vitest thresholds, `npm audit`; e2e suite typecheck; kustomize render, shellcheck, actionlint |
+| **Build** | `delivery.yml` | Pushes `ghcr.io/sun-wukhan/rolodex-{api,web}:<sha>`, fails on fixable HIGH/CRITICAL image CVEs, generates an SPDX SBOM and attaches signed SLSA build-provenance and SBOM attestations (`gh attestation verify oci://... --repo Sun-Wukhan/rolodex`) |
+| **Staging** | `delivery.yml` | Creates an ephemeral kind cluster, deploys the exact images with the same manifests and Makefile targets as minikube, using random per-run credentials. Then runs the **smoke test** (27 API and web checks), the **Playwright e2e** suite and **DAST**: an authenticated OWASP ZAP active scan driven by `api/openapi.yaml`, plus a ZAP baseline scan of the web app. Any alert not triaged in `.zap/*-rules.tsv` fails the stage. Reports and, on failure, cluster diagnostics are uploaded as artifacts |
+| **Production** | `pages.yml` (called by Delivery) | Deploys the demo build to GitHub Pages |
+| **Verify** | `delivery.yml` | Runs the Playwright suite against the live site |
+| **Rollback** | `delivery.yml` | If verification fails, finds the last green release and prints the redeploy command (simulated) |
+| **Notify** | `delivery.yml` | Always runs and prints the email a mail step would send, routed by outcome (see below) |
+| | `pr-title.yml` | Conventional Commit PR titles so squash merges keep a clean history |
+| | `release.yml` | release-please generates `CHANGELOG.md` and release PRs from commit messages |
+
+**Notification routing** (simulated with `echo`, and also written to the run summary):
+
+| Outcome | To | Cc |
+| --- | --- | --- |
+| Released to production | release managers | commit author |
+| SAST or DAST failed | security team | commit author |
+| Production verification failed | on-call | release managers, commit author |
+| Any other failure before production | commit author | on-call |
+
+Distribution lists come from the repository variables `NOTIFY_RELEASE`,
+`NOTIFY_SECURITY` and `NOTIFY_ONCALL`, with `*@rolodex.example` placeholders. Each
+message includes the stage results, lead time from commit to notification, and links to
+the run, the commit, code scanning and production. To send real email, replace the
+`echo` with an SMTP action using credentials stored as secrets.
+
+DAST has already paid for itself: its first run found that a NUL byte in a search term
+returned a 500 (now rejected as a 400), and the baseline scan found that nginx dropped
+every security header on responses (fixed with a per-location include).
+
+Dependabot (`.github/dependabot.yml`) opens weekly grouped updates for Go modules, npm
+(web and e2e), GitHub Actions (SHA pins included) and Docker base images, after a 7-day
+cooldown. Workflows default to a read-only `GITHUB_TOKEN`, and each job requests only
+the extra scopes it needs: packages and attestations for the build, Pages for
+production, security-events for SARIF.
+
+The `staging` and `github-pages` environments can be given required reviewers in the
+repository settings to add a manual approval gate before each deployment.
 
 Branching: work happens on short-lived branches (`feat/backend`, `feat/frontend`,
 `chore/cicd` in this repo's history) merged into `main` with `--no-ff`. On GitHub,

@@ -51,6 +51,9 @@ func NewAuthService(repo repository.UserRepository, hasher security.PasswordHash
 // Login verifies a username/password pair and returns an access token. Every
 // failure mode returns domain.ErrUnauthorized so callers cannot enumerate users.
 func (s *AuthService) Login(ctx context.Context, username, password string) (AccessToken, error) {
+	if !isPlainText(username) {
+		return AccessToken{}, domain.ErrUnauthorized
+	}
 	username = strings.ToLower(strings.TrimSpace(username))
 	if username == "" || password == "" || len(password) > maxPasswordLen {
 		return AccessToken{}, domain.ErrUnauthorized

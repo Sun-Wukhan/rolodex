@@ -12,6 +12,13 @@ coverage.*
 node_modules/
 web/dist/
 web/coverage/
+e2e/test-results/
+e2e/playwright-report/
+e2e/results.xml
+
+# Security scan output
+dast-reports/
+*.sarif
 
 # Env / secrets
 .env

@@ -220,6 +220,7 @@ func TestRequestValidation(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/users", http.StatusBadRequest},
 		{http.MethodGet, "/api/v1/users?name=a&limit=abc", http.StatusBadRequest},
+		{http.MethodGet, "/api/v1/users?name=%00", http.StatusBadRequest},
 		{http.MethodGet, "/api/v1/users/not-a-uuid", http.StatusBadRequest},
 		{http.MethodGet, "/api/v1/users/00000000-0000-0000-0000-000000000000", http.StatusNotFound},
 		{http.MethodPost, "/api/v1/users/" + e.userID + "/enrich?provider=nope", http.StatusBadRequest},
@@ -251,7 +252,8 @@ func TestRequestValidation(t *testing.T) {
 func TestHealthAndSecurityHeaders(t *testing.T) {
 	e := setup(t, nil)
 	resp, _ := e.do(t, http.MethodGet, "/healthz", "", nil)
-	if resp.StatusCode != 200 || resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+	if resp.StatusCode != 200 || resp.Header.Get("X-Content-Type-Options") != "nosniff" ||
+		resp.Header.Get("Cross-Origin-Resource-Policy") != "same-origin" {
 		t.Fatalf("healthz: %d %v", resp.StatusCode, resp.Header)
 	}
 	resp, _ = e.do(t, http.MethodGet, "/readyz", "", nil)

@@ -157,10 +157,17 @@ flowchart LR
   CI -->|vite build| Pages[GitHub Pages: web]
 ```
 
-- The CI half of this pipeline exists today (`.github/workflows/ci.yml`): lint, tests on
-  SQLite and PostgreSQL with an 80% coverage gate, `govulncheck`, `npm audit`, and image
-  builds. Deployment would be a further job gated on `main` that pushes the image to
-  Artifact Registry and runs `gcloud run deploy`.
+- Most of this pipeline exists today in `.github/workflows/delivery.yml`:
+  - SAST and CI gate the build.
+  - Images are pushed to GHCR with a Trivy scan, an SBOM and signed provenance.
+  - Staging is an ephemeral kind cluster running smoke, Playwright and ZAP DAST.
+  - Production is GitHub Pages, followed by Playwright verification and a simulated
+    notification.
+
+  For a hosted API, staging and production would become Cloud Run services. The image
+  would be promoted by digest from GHCR to Artifact Registry, `gcloud run deploy` would
+  replace the kind step, and the same smoke, e2e and DAST stages would point at the
+  staging URL.
 - Cloud Run fits a stateless Go container that scales to zero; GitHub Actions
   authenticates with Workload Identity Federation (no long-lived keys).
 - Cloud Run sits behind Google's front end, so the API would set
