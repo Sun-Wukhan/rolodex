@@ -52,10 +52,10 @@ jobs:
       matrix:
         include:
           - image: api
-            context: .
+            context: backend
             build-args: ""
           - image: web
-            context: web
+            context: frontend
             # Staging port-forwards the API to localhost:8080 on the runner.
             build-args: VITE_API_URL=http://localhost:8080
     env:
@@ -243,7 +243,7 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}
         with:
-          node-version-file: web/.nvmrc
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 
@@ -331,7 +331,7 @@ jobs:
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version-file: web/.nvmrc
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 

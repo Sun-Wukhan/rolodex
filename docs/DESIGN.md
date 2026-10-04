@@ -34,7 +34,7 @@ flowchart LR
 - `httpapi` depends on small consumer-defined interfaces (`Authenticator`,
   `ProfileManager`, `Enricher`), so handlers contain no business logic and can be
   tested in isolation.
-- `cmd/api/main.go` is the only place that knows about concrete implementations.
+- `backend/cmd/api/main.go` is the only place that knows about concrete implementations.
 
 ## 3. Data model
 

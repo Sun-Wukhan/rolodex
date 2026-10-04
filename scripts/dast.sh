@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Dynamic application security testing (DAST) with OWASP ZAP against a running
 # deployment:
-#   1. API scan  - authenticated active scan driven by api/openapi.yaml
+#   1. API scan  - authenticated active scan driven by backend/api/openapi.yaml
 #   2. Web scan  - passive baseline scan of the web front end
 # Any alert not triaged in .zap/*-rules.tsv fails the run, so new findings
 # block the pipeline until they are fixed or explicitly accepted.
@@ -40,7 +40,7 @@ fi
 
 mkdir -p "$DAST_REPORT_DIR"
 report_abs="$(cd "$DAST_REPORT_DIR" && pwd)"
-cp api/openapi.yaml .zap/api-rules.tsv .zap/web-rules.tsv "$DAST_REPORT_DIR/"
+cp backend/api/openapi.yaml .zap/api-rules.tsv .zap/web-rules.tsv "$DAST_REPORT_DIR/"
 # The ZAP image runs as an unprivileged user that must write reports here.
 chmod a+rwx "$DAST_REPORT_DIR"
 

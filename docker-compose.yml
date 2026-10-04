@@ -1,5 +1,5 @@
 x-go-image: &go-image
-  build: .
+  build: ./backend
   image: rolodex:local
 
 services:
@@ -89,7 +89,7 @@ services:
 
   web:
     build:
-      context: ./web
+      context: ./frontend
       args:
         VITE_API_URL: http://localhost:8080
     ports:
