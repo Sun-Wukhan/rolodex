@@ -16,8 +16,10 @@ GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1
 TRIVY_IMAGE ?= aquasec/trivy:0.75.0
 # Seeded account password for post-deploy tests, read from .env.
 SEED_PASSWORD = $$(sed -n 's/^SEED_PASSWORD=//p' .env)
+# Local runs keep profiles and credentials in two separate SQLite files.
+SQLITE_DBS := DATABASE_URL=rolodex.db CREDENTIALS_DATABASE_URL=rolodex-credentials.db
 
-.PHONY: help env dev run-mock seed-local run-api web up down logs \
+.PHONY: help env login-info dev run-mock seed-local run-api web up down logs \
 	k8s-up k8s-images k8s-secret k8s-apply k8s-forward k8s-status k8s-logs k8s-down \
 	test pg-up pg-down test-pg cover lint vuln fmt ci web-test \
 	sast smoke e2e dast
@@ -30,6 +32,11 @@ help: ## Show available targets
 env: ## Create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env - edit the change-me values")
 
+login-info: env ## Print the demo accounts you can sign in with
+	@echo "Usernames: admin, ada, grace, alan, katherine"
+	@echo "Password:  $(SEED_PASSWORD)   (SEED_PASSWORD in .env, shared by all demo accounts)"
+	@echo "GitHub Pages demo: any of those usernames with any password of 12+ characters"
+
 ##@ Run locally without Docker (SQLite)
 
 dev: env ## Run mock vendors, seed, API and web dev server together (Ctrl-C stops all)
@@ -39,11 +46,11 @@ run-mock: ## Run only the mock vendors (reads .env)
 	set -a; source .env; set +a; MOCK_ABC_USERNAME=$$ABC_USERNAME MOCK_ABC_PASSWORD=$$ABC_PASSWORD \
 	MOCK_XYC_USERNAME=$$XYC_USERNAME MOCK_XYC_PASSWORD=$$XYC_PASSWORD go run ./cmd/mockvendors
 
-seed-local: ## Seed the local SQLite database
-	set -a; source .env; set +a; DB_DRIVER=sqlite DATABASE_URL=rolodex.db go run ./cmd/seed
+seed-local: ## Seed the local SQLite databases (profiles and credentials files)
+	set -a; source .env; set +a; DB_DRIVER=sqlite $(SQLITE_DBS) go run ./cmd/seed
 
 run-api: ## Run only the API against SQLite and local mock vendors
-	set -a; source .env; set +a; DB_DRIVER=sqlite DATABASE_URL=rolodex.db \
+	set -a; source .env; set +a; DB_DRIVER=sqlite $(SQLITE_DBS) \
 	ABC_BASE_URL=http://localhost:9001 XYC_BASE_URL=http://localhost:9002 go run ./cmd/api
 
 web: ## Run only the frontend dev server (http://localhost:5173)
@@ -53,7 +60,7 @@ web: ## Run only the frontend dev server (http://localhost:5173)
 
 up: env ## Build and start the full stack
 	docker compose up --build -d
-	@echo "API: http://localhost:8080   Web: http://localhost:3000"
+	@echo "API: http://localhost:8080   Web: http://localhost:3000   ('make login-info' shows the sign-in)"
 
 down: ## Stop the stack and remove volumes
 	docker compose down -v
@@ -67,11 +74,12 @@ k8s-up: env ## Start minikube if needed, build images, deploy everything and wai
 	@$(MINIKUBE) status >/dev/null 2>&1 || $(MINIKUBE) start --cpus=2 --memory=3072
 	$(MAKE) k8s-images k8s-secret k8s-apply
 	$(KUBECTL) rollout status statefulset/postgres --timeout=180s
+	$(KUBECTL) rollout status statefulset/credentials-db --timeout=180s
 	$(KUBECTL) wait --for=condition=complete job/seed --timeout=180s
 	$(KUBECTL) rollout status deployment/mockvendors --timeout=120s
 	$(KUBECTL) rollout status deployment/api --timeout=180s
 	$(KUBECTL) rollout status deployment/web --timeout=120s
-	@echo "Deployed. Run 'make k8s-forward', then open http://localhost:3000"
+	@echo "Deployed. Run 'make k8s-forward', then open http://localhost:3000 ('make login-info' shows the sign-in)"
 
 k8s-images: ## Build the API and web images inside minikube
 	$(MINIKUBE) image build -t rolodex:local .

@@ -31,7 +31,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-export DB_DRIVER=sqlite DATABASE_URL="${LOCAL_SQLITE_PATH:-rolodex.db}"
+# Profiles and credentials (password hashes) live in separate database files.
+export DB_DRIVER=sqlite DATABASE_URL="${LOCAL_SQLITE_PATH:-rolodex.db}" \
+  CREDENTIALS_DATABASE_URL="${LOCAL_SQLITE_CREDENTIALS_PATH:-rolodex-credentials.db}"
 
 echo "==> Building Go binaries"
 mkdir -p bin
@@ -43,7 +45,7 @@ MOCK_ABC_USERNAME="$ABC_USERNAME" MOCK_ABC_PASSWORD="$ABC_PASSWORD" \
   ./bin/mockvendors 2>&1 | sed 's/^/[vendors] /' &
 pids+=("$!")
 
-echo "==> Seeding $DATABASE_URL"
+echo "==> Seeding $DATABASE_URL (profiles) and $CREDENTIALS_DATABASE_URL (credentials)"
 ./bin/seed 2>&1 | sed 's/^/[seed] /'
 
 echo "==> Starting API on :8080"
@@ -58,5 +60,6 @@ echo "==> Starting web on :5173"
 pids+=("$!")
 
 echo
-echo "Rolodex is starting: open http://localhost:5173 (sign in as admin / \$SEED_PASSWORD from .env)"
+echo "Rolodex is starting: open http://localhost:5173"
+echo "Sign in as admin (or ada, grace, alan, katherine) with password: $SEED_PASSWORD"
 wait

@@ -19,21 +19,6 @@ CREATE TABLE user_profiles (
 CREATE INDEX idx_profiles_phone ON user_profiles (phone);
 CREATE INDEX idx_profiles_name_lower ON user_profiles (lower(name));
 
-CREATE TABLE user_credentials (
-    id           TEXT PRIMARY KEY,
-    user_id      TEXT NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    method       TEXT NOT NULL CHECK (method IN ('password', 'oauth', 'passkey')),
-    username     TEXT NOT NULL,
-    secret_hash  TEXT,
-    created_at   DATETIME NOT NULL,
-    last_used_at DATETIME,
-    UNIQUE (method, username)
-);
-
-CREATE INDEX idx_credentials_user_id ON user_credentials (user_id);
-CREATE INDEX idx_credentials_username_lower ON user_credentials (lower(username));
-
 -- +goose Down
-DROP TABLE user_credentials;
 DROP TABLE user_profiles;
 DROP TABLE users;

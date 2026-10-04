@@ -11,6 +11,7 @@ labels:
 resources:
   - namespace.yaml
   - postgres.yaml
+  - credentials-db.yaml
   - mockvendors.yaml
   - seed-job.yaml
   - api.yaml
