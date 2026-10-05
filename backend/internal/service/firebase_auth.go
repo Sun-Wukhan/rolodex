@@ -23,7 +23,7 @@ type IDTokenVerifier interface {
 	Verify(ctx context.Context, token string) (security.FirebaseIdentity, error)
 }
 
-// AnyDomain, listed as an allowed domain, admits every verified email.
+// AnyDomain admits every verified email when it is listed as an allowed domain.
 const AnyDomain = "*"
 
 // EmailAllowlist decides which verified email addresses may sign in with
