@@ -1,5 +1,5 @@
 # Go
-/bin/
+/backend/bin/
 *.test
 *.out
 coverage.*
@@ -10,8 +10,8 @@ coverage.*
 
 # Node
 node_modules/
-web/dist/
-web/coverage/
+frontend/dist/
+frontend/coverage/
 e2e/test-results/
 e2e/playwright-report/
 e2e/results.xml

@@ -41,6 +41,11 @@ numbers and addresses; the credentials database (`CREDENTIALS_DATABASE_URL`,
 Kubernetes they are separate PostgreSQL servers; locally they are two SQLite files. See
 [Database design](#database-design).
 
+Profile reads and writes are split: writes go to the profiles primary and reads
+(search, profile views) go to a read-only streaming replica (`DATABASE_READ_URL`),
+falling back to the primary when the replica lags or is down. See
+[Read/write split](docs/DESIGN.md#readwrite-split-for-profiles).
+
 The REST API uses short-lived HS256 bearer JWTs issued by `POST /api/v1/auth/login`.
 ABC and XYC are treated as interchangeable implementations of an `IdentityProvider`
 interface. Their `/auth` + `/identity` contract is treated as an external contract we
@@ -89,6 +94,24 @@ only creates missing users, so changing `SEED_PASSWORD` later does not change ex
 accounts; reset the data (`make down`, `make k8s-down`, or delete the `*.db` files) and
 start again to apply a new one.
 
+#### Sign in with Google (optional)
+
+The login page can also offer **Sign in with Google** through Firebase Authentication.
+It is off unless configured; fill in the Firebase block in `.env` (see `.env.example`):
+
+- `FIREBASE_PROJECT_ID` plus `FIREBASE_ALLOWED_EMAILS` and/or `FIREBASE_ALLOWED_DOMAINS`
+  for the API. Only verified Google emails on the allowlist get in; the first sign-in
+  creates a Rolodex user linked to that email (an `oauth` credential, no password).
+  `FIREBASE_ALLOWED_DOMAINS=*` admits any verified Google account, which gives anyone
+  with one full API access, including vendor enrichment calls.
+- `VITE_FIREBASE_*` (the public web-app config) for the UI, baked in at build time.
+
+The browser exchanges the Firebase ID token at `POST /api/v1/auth/firebase` for the usual
+Rolodex JWT, then signs out of Firebase, so nothing is persisted in the browser. The API
+checks the token against Google's published keys using only the project ID. The site's
+origin (`localhost` is allowed by default) must be listed under *Authentication >
+Settings > Authorized domains* in the Firebase console.
+
 Demo flow in the UI: sign in as `admin`, search by name for "a", open a profile and
 click **Check all**. Grace gets her missing street and postal code from ABC; Katherine
 is verified by both vendors except for ABC's stale street address; Alan is unknown to
@@ -97,7 +120,8 @@ ABC but fully enriched by XYC.
 ### Local without Docker
 
 `make dev` builds the Go binaries, starts the mock vendors (:9001, :9002), seeds two
-SQLite files (`rolodex.db` for profiles, `rolodex-credentials.db` for credentials),
+SQLite files (`backend/rolodex.db` for profiles, `backend/rolodex-credentials.db` for
+credentials),
 starts the API (:8080) and the Vite dev server (:5173),
 prefixing each process's logs. Ctrl-C stops everything. The individual pieces are also
 available as `make run-mock`, `make seed-local`, `make run-api` and `make web`.
@@ -105,13 +129,14 @@ available as `make run-mock`, `make seed-local`, `make run-api` and `make web`.
 ### Docker Compose
 
 `make up` builds one distroless image for the three Go binaries plus an nginx image for
-the UI, and starts two PostgreSQL servers (`postgres` for profiles, `credentials-db`
-for credentials), the mock vendors, a one-shot seed job, the API and the web app. `make logs` tails the API, `make down` removes everything including data.
+the UI, and starts three PostgreSQL servers (`postgres` for profile writes, its
+streaming replica `postgres-replica` for profile reads, and `credentials-db` for
+credentials), the mock vendors, a one-shot seed job, the API and the web app. `make logs` tails the API, `make down` removes everything including data.
 
 | Service      | URL                      | Notes                                 |
 | ------------ | ------------------------ | ------------------------------------- |
 | Web UI       | http://localhost:3000    | React app served by nginx             |
-| API          | http://localhost:8080    | OpenAPI spec in `api/openapi.yaml`    |
+| API          | http://localhost:8080    | OpenAPI spec in `backend/api/openapi.yaml` |
 | Mock vendors | :9001 (ABC), :9002 (XYC) | XYC injects 503s to exercise retries  |
 
 ### Minikube
@@ -125,9 +150,10 @@ make k8s-down      # deletes the rolodex namespace
 
 Manifests live in [`deploy/k8s`](deploy/k8s) (plain YAML composed with kustomize):
 
-- Two **PostgreSQL** StatefulSets, `postgres` (profiles) and `credentials-db`
-  (credentials), each with its own account, 1Gi PersistentVolumeClaim and readiness
-  probe.
+- Three **PostgreSQL** StatefulSets, each with a 1Gi PersistentVolumeClaim and
+  readiness probe: `postgres` (profiles primary, takes writes), `postgres-replica`
+  (hot standby that streams from the primary and serves profile reads) and
+  `credentials-db` (credentials, its own account).
 - **API** Deployment with 2 replicas, `/readyz` readiness and `/healthz` liveness
   probes. Migrations take a PostgreSQL advisory lock, so replicas starting together
   never race.
@@ -161,11 +187,11 @@ GitHub Pages serves static files only, so it cannot run the Go API or PostgreSQL
 Rather than require a cloud account, the hosted site is a **demo build** of the same
 React app:
 
-- `pages.yml` builds `web/` with `VITE_DEMO_MODE=true` and deploys it to
+- `pages.yml` builds `frontend/` with `VITE_DEMO_MODE=true` and deploys it to
   https://sun-wukhan.github.io/rolodex/. It is the production stage of the
   [delivery pipeline](#cicd-and-workflow), so it only runs after staging passed.
 - In demo mode the API client's `fetch` is swapped for an in-browser implementation of
-  the Rolodex API ([`web/src/demo`](web/src/demo)). It mirrors the backend's
+  the Rolodex API ([`frontend/src/demo`](frontend/src/demo)). It mirrors the backend's
   validation, search semantics, phone normalisation and enrichment merge rules over the
   same seed and mock-vendor datasets, and is unit tested through the real API client.
   Data lives in memory and resets on reload.
@@ -216,7 +242,23 @@ flowchart TD
 ```
 
 Layers depend inward only: handlers -> services -> interfaces. Concrete databases and
-vendors are chosen once in `cmd/api/main.go` (the composition root).
+vendors are chosen once in `backend/cmd/api/main.go` (the composition root).
+
+The repository is split into a Go **backend** and a React **frontend**, with the
+pieces that span both at the top level:
+
+```
+backend/              Go module: API, mock vendors, seed (Dockerfile, go.mod)
+frontend/             React + Vite web app (Dockerfile, nginx config, package.json)
+e2e/                  Playwright tests against a deployed stack
+deploy/k8s/           Kubernetes manifests (kustomize)
+scripts/              dev runner, smoke test, DAST
+docs/                 design notes
+.github/              CI/CD workflows, Dependabot
+docker-compose.yml    full local stack;  Makefile  one entry point for everything
+```
+
+Inside `backend/`:
 
 ```
 cmd/
@@ -242,11 +284,15 @@ migrations/       embedded goose migrations per dialect and database
 api/openapi.yaml  API contract
 ```
 
+Run Go commands from `backend/` (or `go -C backend ...`) and npm commands from
+`frontend/`; the Makefile does this for you.
+
 ## API
 
 | Method | Path                          | Auth | Purpose                                            |
 | ------ | ----------------------------- | ---- | -------------------------------------------------- |
 | POST   | `/api/v1/auth/login`          | -    | Username + password -> access token (rate limited) |
+| POST   | `/api/v1/auth/firebase`       | -    | Firebase ID token -> access token (when enabled)   |
 | GET    | `/api/v1/me`                  | JWT  | Caller identity                                    |
 | GET    | `/api/v1/users`               | JWT  | Search by `name`, `phone`, `username` (AND)        |
 | POST   | `/api/v1/users`               | JWT  | Create user + profile + password credential        |
@@ -260,11 +306,11 @@ Errors always use one envelope:
 
 ## Frontend
 
-`web/` is a deliberately thin React 19 + TypeScript + Vite client. The time budget went
-into the backend, but the UI demonstrates the API contract end to end.
+`frontend/` is a deliberately thin React 19 + TypeScript + Vite client. The time budget
+went into the backend, but the UI demonstrates the API contract end to end.
 
 ```
-web/src/
+frontend/src/
   api/          typed API client (client.ts), wire types, error description
   auth/         in-memory session context, provider, route guard
   components/   reusable styled-components primitives: Button, TextField, Card,
@@ -292,7 +338,7 @@ web/src/
 ## Database design
 
 ```
-profiles database (DATABASE_URL)
+profiles database (DATABASE_URL; read replica at DATABASE_READ_URL)
   users            (id PK, created_at, updated_at)
   user_profiles    (user_id PK/FK -> users, name, phone E.164, street_address,
                     locality, region, postal_code, country)          1:1
@@ -440,7 +486,7 @@ flowchart LR
 | **SAST** | `security.yml` (PRs, weekly, and Delivery) | CodeQL `security-extended` for Go and TypeScript; Semgrep (Go, TS/React, secrets, Dockerfile, Kubernetes, Actions rules) failing on ERROR severity; Gitleaks over full git history; Trivy for dependency CVEs, Dockerfile/Kubernetes misconfigurations and secrets, failing on fixable HIGH/CRITICAL; dependency review on PRs. All results go to **Security > Code scanning** as SARIF |
 | **CI** | `ci.yml` (PRs, and Delivery) | gofmt, `go vet`, golangci-lint, race-enabled tests on SQLite **and** PostgreSQL, 80% coverage gate, `govulncheck`; ESLint, Prettier, `tsc`, Vitest thresholds, `npm audit`; e2e suite typecheck; kustomize render, shellcheck, actionlint |
 | **Build** | `delivery.yml` | Pushes `ghcr.io/sun-wukhan/rolodex-{api,web}:<sha>`, fails on fixable HIGH/CRITICAL image CVEs, generates an SPDX SBOM and attaches signed SLSA build-provenance and SBOM attestations (`gh attestation verify oci://... --repo Sun-Wukhan/rolodex`) |
-| **Staging** | `delivery.yml` | Creates an ephemeral kind cluster, deploys the exact images with the same manifests and Makefile targets as minikube, using random per-run credentials. Then runs the **smoke test** (27 API and web checks), the **Playwright e2e** suite and **DAST**: an authenticated OWASP ZAP active scan driven by `api/openapi.yaml`, plus a ZAP baseline scan of the web app. Any alert not triaged in `.zap/*-rules.tsv` fails the stage. Reports and, on failure, cluster diagnostics are uploaded as artifacts |
+| **Staging** | `delivery.yml` | Creates an ephemeral kind cluster, deploys the exact images with the same manifests and Makefile targets as minikube, using random per-run credentials. Then runs the **smoke test** (27 API and web checks), the **Playwright e2e** suite and **DAST**: an authenticated OWASP ZAP active scan driven by `backend/api/openapi.yaml`, plus a ZAP baseline scan of the web app. Any alert not triaged in `.zap/*-rules.tsv` fails the stage. Reports and, on failure, cluster diagnostics are uploaded as artifacts |
 | **Production** | `pages.yml` (called by Delivery) | Deploys the demo build to GitHub Pages |
 | **Verify** | `delivery.yml` | Runs the Playwright suite against the live site |
 | **Rollback** | `delivery.yml` | If verification fails, finds the last green release and prints the redeploy command (simulated) |

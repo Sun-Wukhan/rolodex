@@ -52,10 +52,10 @@ jobs:
       matrix:
         include:
           - image: api
-            context: .
+            context: backend
             build-args: ""
           - image: web
-            context: web
+            context: frontend
             # Staging port-forwards the API to localhost:8080 on the runner.
             build-args: VITE_API_URL=http://localhost:8080
     env:
@@ -189,15 +189,18 @@ jobs:
           seed="$(rand 16)"
           db="$(rand 24)"
           creds_db="$(rand 24)"
+          repl="$(rand 24)"
           jwt="$(rand 32)"
           abc="$(rand 24)"
           xyc="$(rand 24)"
-          for v in "$seed" "$db" "$creds_db" "$jwt" "$abc" "$xyc"; do echo "::add-mask::$v"; done
+          for v in "$seed" "$db" "$creds_db" "$repl" "$jwt" "$abc" "$xyc"; do echo "::add-mask::$v"; done
           umask 077
           cat > .env <<EOF
           POSTGRES_USER=rolodex
           POSTGRES_PASSWORD=${db}
           POSTGRES_DB=rolodex
+          REPLICATION_USER=rolodex_replicator
+          REPLICATION_PASSWORD=${repl}
           CREDENTIALS_DB_USER=rolodex_auth
           CREDENTIALS_DB_PASSWORD=${creds_db}
           CREDENTIALS_DB_NAME=rolodex_credentials
@@ -219,6 +222,7 @@ jobs:
           # limiter itself is covered by unit tests.
           kubectl -n rolodex set env deployment/api LOGIN_RATE_PER_MINUTE=120
           kubectl -n rolodex rollout status statefulset/postgres --timeout=180s
+          kubectl -n rolodex rollout status statefulset/postgres-replica --timeout=180s
           kubectl -n rolodex rollout status statefulset/credentials-db --timeout=180s
           kubectl -n rolodex wait --for=condition=complete job/seed --timeout=180s
           kubectl -n rolodex rollout status deployment/mockvendors --timeout=120s
@@ -243,7 +247,7 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         if: ${{ !cancelled() && steps.deploy.outcome == 'success' }}
         with:
-          node-version-file: web/.nvmrc
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 
@@ -284,7 +288,7 @@ jobs:
           mkdir -p diagnostics
           kubectl -n rolodex get all,events -o wide > diagnostics/resources.txt 2>&1 || true
           kubectl -n rolodex describe pods > diagnostics/pods.txt 2>&1 || true
-          for app in api web mockvendors postgres credentials-db seed; do
+          for app in api web mockvendors postgres postgres-replica credentials-db seed; do
             kubectl -n rolodex logs -l "app.kubernetes.io/name=${app}" --all-containers --prefix --tail=500 \
               > "diagnostics/${app}.log" 2>&1 || true
           done
@@ -331,7 +335,7 @@ jobs:
 
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version-file: web/.nvmrc
+          node-version-file: frontend/.nvmrc
           cache: npm
           cache-dependency-path: e2e/package-lock.json
 

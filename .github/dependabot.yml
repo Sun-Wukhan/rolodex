@@ -3,7 +3,7 @@ version: 2
 # compromised packages to be discovered and yanked.
 updates:
   - package-ecosystem: gomod
-    directory: /
+    directory: /backend
     schedule:
       interval: weekly
     cooldown:
@@ -15,7 +15,7 @@ updates:
         update-types: [minor, patch]
 
   - package-ecosystem: npm
-    directories: [/web, /e2e]
+    directories: [/frontend, /e2e]
     schedule:
       interval: weekly
     cooldown:
@@ -45,7 +45,7 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: docker
-    directories: [/, /web]
+    directories: [/backend, /frontend]
     schedule:
       interval: weekly
     cooldown:

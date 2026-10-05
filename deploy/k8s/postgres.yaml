@@ -35,6 +35,7 @@ spec:
       containers:
         - name: postgres
           image: postgres:16-alpine
+          args: ["-c", "hba_file=/etc/rolodex/postgres/pg_hba.conf", "-c", "wal_keep_size=256MB"]
           ports:
             - containerPort: 5432
           env:
@@ -65,7 +66,12 @@ spec:
               mountPath: /var/run/postgresql
             - name: tmp
               mountPath: /tmp
+            - name: config
+              mountPath: /etc/rolodex/postgres
+              readOnly: true
       volumes:
+        - name: config
+          configMap: { name: postgres-replication }
         - name: run
           emptyDir: {}
         - name: tmp
