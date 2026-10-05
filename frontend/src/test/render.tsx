@@ -12,6 +12,7 @@ export function mockApi(overrides: Partial<ApiClient> = {}): ApiClient {
   return {
     setToken: vi.fn(),
     login: vi.fn(),
+    firebaseLogin: vi.fn(),
     me: vi.fn(),
     searchUsers: vi.fn(),
     getUser: vi.fn(),
@@ -37,7 +38,9 @@ export function renderWithProviders(
     session: { token: 't', username: 'admin', expiresAt: new Date(Date.now() + 60_000) },
     api: mockApi(),
     demo: false,
+    googleEnabled: false,
     login: vi.fn(),
+    loginWithGoogle: vi.fn(),
     logout: vi.fn(),
     ...auth,
   };

@@ -26,6 +26,11 @@ type Authenticator interface {
 	Login(ctx context.Context, username, password string) (service.AccessToken, error)
 }
 
+// FirebaseAuthenticator exchanges a Firebase ID token for an access token.
+type FirebaseAuthenticator interface {
+	Login(ctx context.Context, idToken string) (service.AccessToken, error)
+}
+
 // ProfileManager creates, reads and searches profiles.
 type ProfileManager interface {
 	CreateUser(ctx context.Context, in service.CreateUserInput) (domain.User, error)
@@ -46,6 +51,7 @@ type Pinger interface {
 
 type handlers struct {
 	auth     Authenticator
+	firebase FirebaseAuthenticator
 	profiles ProfileManager
 	identity Enricher
 	ready    Pinger
@@ -55,6 +61,10 @@ type handlers struct {
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type firebaseLoginRequest struct {
+	IDToken string `json:"id_token"`
 }
 
 // SearchResponse is the paginated search result envelope.
@@ -70,6 +80,19 @@ func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tok, err := h.auth.Login(r.Context(), req.Username, req.Password)
+	if err != nil {
+		handleError(w, r, h.log, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, tok)
+}
+
+func (h *handlers) firebaseLogin(w http.ResponseWriter, r *http.Request) {
+	var req firebaseLoginRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	tok, err := h.firebase.Login(r.Context(), req.IDToken)
 	if err != nil {
 		handleError(w, r, h.log, err)
 		return

@@ -104,6 +104,9 @@ services:
       XYC_BASE_URL: http://mockvendors:9002
       XYC_USERNAME: ${XYC_USERNAME}
       XYC_PASSWORD: ${XYC_PASSWORD}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-}
+      FIREBASE_ALLOWED_EMAILS: ${FIREBASE_ALLOWED_EMAILS:-}
+      FIREBASE_ALLOWED_DOMAINS: ${FIREBASE_ALLOWED_DOMAINS:-}
     ports:
       - "8080:8080"
     depends_on:
@@ -123,6 +126,10 @@ services:
       context: ./frontend
       args:
         VITE_API_URL: http://localhost:8080
+        VITE_FIREBASE_API_KEY: ${VITE_FIREBASE_API_KEY:-}
+        VITE_FIREBASE_AUTH_DOMAIN: ${VITE_FIREBASE_AUTH_DOMAIN:-}
+        VITE_FIREBASE_PROJECT_ID: ${VITE_FIREBASE_PROJECT_ID:-}
+        VITE_FIREBASE_APP_ID: ${VITE_FIREBASE_APP_ID:-}
     ports:
       - "3000:8080"
     depends_on:

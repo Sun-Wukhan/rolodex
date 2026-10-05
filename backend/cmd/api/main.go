@@ -17,6 +17,7 @@ import (
 	"github.com/Sun-Wukhan/rolodex/internal/provider"
 	"github.com/Sun-Wukhan/rolodex/internal/provider/abc"
 	"github.com/Sun-Wukhan/rolodex/internal/provider/xyc"
+	"github.com/Sun-Wukhan/rolodex/internal/repository"
 	"github.com/Sun-Wukhan/rolodex/internal/repository/factory"
 	"github.com/Sun-Wukhan/rolodex/internal/security"
 	"github.com/Sun-Wukhan/rolodex/internal/service"
@@ -63,11 +64,15 @@ func run() error {
 	}
 	profiles := service.NewProfileService(repo, hasher)
 	identity := service.NewIdentityService(repo, buildProviders(cfg, log), cfg.ProviderTimeout, log)
+	firebase, err := buildFirebase(cfg, repo, tokens, log)
+	if err != nil {
+		return err
+	}
 
 	srv := &http.Server{
 		Addr: cfg.HTTPAddr,
 		Handler: httpapi.NewRouter(httpapi.Deps{
-			Auth: auth, Profiles: profiles, Identity: identity, Ready: repo, Tokens: tokens, Log: log,
+			Auth: auth, Firebase: firebase, Profiles: profiles, Identity: identity, Ready: repo, Tokens: tokens, Log: log,
 			CORSAllowedOrigins: cfg.CORSAllowedOrigins, LoginRatePerMinute: cfg.LoginRatePerMinute,
 			TrustedProxyCIDRs: cfg.TrustedProxyCIDRs,
 		}),
@@ -95,6 +100,25 @@ func run() error {
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelShutdown()
 	return srv.Shutdown(shutdownCtx)
+}
+
+// buildFirebase returns the Google sign-in authenticator, or nil (route
+// disabled) when FIREBASE_PROJECT_ID is unset.
+func buildFirebase(cfg config.Config, repo repository.UserRepository, tokens service.TokenIssuer, log *slog.Logger) (httpapi.FirebaseAuthenticator, error) {
+	if !cfg.Firebase.Enabled() {
+		return nil, nil
+	}
+	verifier, err := security.NewFirebaseVerifier(cfg.Firebase.ProjectID, security.FirebaseKeysURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	allow := service.NewEmailAllowlist(cfg.Firebase.AllowedEmails, cfg.Firebase.AllowedDomains)
+	log.Info("firebase sign-in enabled", "project_id", cfg.Firebase.ProjectID,
+		"allowed_emails", len(cfg.Firebase.AllowedEmails), "allowed_domains", cfg.Firebase.AllowedDomains)
+	if allow.AllowsAny() {
+		log.Warn("firebase sign-in admits any verified Google account", "setting", "FIREBASE_ALLOWED_DOMAINS="+service.AnyDomain)
+	}
+	return service.NewFirebaseAuthService(repo, verifier, allow, tokens, log), nil
 }
 
 func buildProviders(cfg config.Config, log *slog.Logger) []provider.IdentityProvider {

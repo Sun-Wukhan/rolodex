@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -40,7 +41,20 @@ type Config struct {
 	ABC                 ProviderConfig
 	XYC                 ProviderConfig
 	LogLevel            slog.Level
+	Firebase            FirebaseConfig
 }
+
+// FirebaseConfig enables Google sign-in through Firebase Authentication.
+type FirebaseConfig struct {
+	ProjectID      string
+	AllowedEmails  []string
+	AllowedDomains []string
+}
+
+// Enabled reports whether Firebase sign-in has been configured.
+func (f FirebaseConfig) Enabled() bool { return f.ProjectID != "" }
+
+var firebaseProjectPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{4,28}[a-z0-9]$`)
 
 // Load reads configuration from the environment.
 func Load() (Config, error) {
@@ -84,6 +98,11 @@ func load(getenv func(string) string) (Config, error) {
 		ABC:                 ProviderConfig{BaseURL: get("ABC_BASE_URL", ""), Username: get("ABC_USERNAME", ""), Password: get("ABC_PASSWORD", "")},
 		XYC:                 ProviderConfig{BaseURL: get("XYC_BASE_URL", ""), Username: get("XYC_USERNAME", ""), Password: get("XYC_PASSWORD", "")},
 		LoginRatePerMinute:  10,
+		Firebase: FirebaseConfig{
+			ProjectID:      get("FIREBASE_PROJECT_ID", ""),
+			AllowedEmails:  splitCSV(get("FIREBASE_ALLOWED_EMAILS", "")),
+			AllowedDomains: splitCSV(get("FIREBASE_ALLOWED_DOMAINS", "")),
+		},
 	}
 
 	if _, err := fmt.Sscanf(get("LOGIN_RATE_PER_MINUTE", "10"), "%d", &cfg.LoginRatePerMinute); err != nil || cfg.LoginRatePerMinute <= 0 {
@@ -116,6 +135,15 @@ func load(getenv func(string) string) (Config, error) {
 		if p.Enabled() && (p.Username == "" || p.Password == "") {
 			errs = append(errs, fmt.Errorf("%s_USERNAME and %s_PASSWORD are required when %s_BASE_URL is set", name, name, name))
 		}
+	}
+	allowlisted := len(cfg.Firebase.AllowedEmails)+len(cfg.Firebase.AllowedDomains) > 0
+	switch {
+	case cfg.Firebase.Enabled() && !firebaseProjectPattern.MatchString(cfg.Firebase.ProjectID):
+		errs = append(errs, fmt.Errorf("FIREBASE_PROJECT_ID: invalid project ID %q", cfg.Firebase.ProjectID))
+	case cfg.Firebase.Enabled() && !allowlisted:
+		errs = append(errs, errors.New("FIREBASE_ALLOWED_EMAILS or FIREBASE_ALLOWED_DOMAINS: required with FIREBASE_PROJECT_ID, otherwise nobody could sign in"))
+	case !cfg.Firebase.Enabled() && allowlisted:
+		errs = append(errs, errors.New("FIREBASE_PROJECT_ID: required when a Firebase allowlist is set"))
 	}
 	if err := cfg.LogLevel.UnmarshalText([]byte(get("LOG_LEVEL", "info"))); err != nil {
 		errs = append(errs, fmt.Errorf("LOG_LEVEL: %w", err))

@@ -70,6 +70,33 @@ func TestLoadCredentialsDatabase(t *testing.T) {
 	}
 }
 
+func TestLoadFirebase(t *testing.T) {
+	secret := strings.Repeat("k", 32)
+	cfg, err := load(env(map[string]string{"JWT_SECRET": secret}))
+	if err != nil || cfg.Firebase.Enabled() {
+		t.Fatalf("firebase must be off by default: %+v %v", cfg.Firebase, err)
+	}
+
+	cfg, err = load(env(map[string]string{
+		"JWT_SECRET": secret, "FIREBASE_PROJECT_ID": "grand-exchange-b10eb",
+		"FIREBASE_ALLOWED_EMAILS": "ada@example.com, grace@example.com", "FIREBASE_ALLOWED_DOMAINS": "navy.mil",
+	}))
+	if err != nil || !cfg.Firebase.Enabled() || len(cfg.Firebase.AllowedEmails) != 2 || len(cfg.Firebase.AllowedDomains) != 1 {
+		t.Fatalf("got %+v, %v", cfg.Firebase, err)
+	}
+
+	for name, vars := range map[string]map[string]string{
+		"project without allowlist": {"FIREBASE_PROJECT_ID": "grand-exchange-b10eb"},
+		"allowlist without project": {"FIREBASE_ALLOWED_DOMAINS": "navy.mil"},
+		"invalid project ID":        {"FIREBASE_PROJECT_ID": "Not A Project", "FIREBASE_ALLOWED_DOMAINS": "navy.mil"},
+	} {
+		vars["JWT_SECRET"] = secret
+		if _, err := load(env(vars)); err == nil || !strings.Contains(err.Error(), "FIREBASE_") {
+			t.Errorf("%s: want FIREBASE_ error, got %v", name, err)
+		}
+	}
+}
+
 func TestLoadReadReplica(t *testing.T) {
 	base := map[string]string{
 		"JWT_SECRET": strings.Repeat("k", 32), "DB_DRIVER": "postgres",

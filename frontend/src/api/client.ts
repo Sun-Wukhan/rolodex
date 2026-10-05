@@ -39,6 +39,8 @@ export interface ApiClient {
   /** Sets (or clears) the bearer token used for authenticated calls. */
   setToken(token: string | null): void;
   login(username: string, password: string): Promise<AccessToken>;
+  /** Exchanges a Firebase ID token (Google sign-in) for a Rolodex token. */
+  firebaseLogin(idToken: string): Promise<AccessToken>;
   me(): Promise<Me>;
   searchUsers(q: SearchQuery): Promise<SearchResponse>;
   getUser(id: string): Promise<UserDetails>;
@@ -92,6 +94,8 @@ export function createApiClient(opts: ApiClientOptions): ApiClient {
     },
     login: (username, password) =>
       request<AccessToken>('POST', '/api/v1/auth/login', { username, password }, false),
+    firebaseLogin: (idToken) =>
+      request<AccessToken>('POST', '/api/v1/auth/firebase', { id_token: idToken }, false),
     me: () => request<Me>('GET', '/api/v1/me'),
     searchUsers: (q) => request<SearchResponse>('GET', `/api/v1/users?${toQuery(q)}`),
     getUser: (id) => request<UserDetails>('GET', `/api/v1/users/${encodeURIComponent(id)}`),

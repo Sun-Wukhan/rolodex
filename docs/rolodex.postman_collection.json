@@ -1,0 +1,173 @@
+{
+  "info": {
+    "name": "Rolodex API",
+    "description": "Set the `password` collection variable to SEED_PASSWORD from .env, run \"Login\" first (it stores the token), then run the rest. Mock vendor requests need `kubectl -n rolodex port-forward deploy/mockvendors 9001:9001 9002:9002` (or `make up`), and the vendor service credentials from .env.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [{ "key": "token", "value": "{{token}}", "type": "string" }]
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "username", "value": "admin" },
+    { "key": "password", "value": "" },
+    { "key": "token", "value": "" },
+    { "key": "userId", "value": "" },
+    { "key": "abcUrl", "value": "http://localhost:9001" },
+    { "key": "xycUrl", "value": "http://localhost:9002" },
+    { "key": "vendorUsername", "value": "" },
+    { "key": "vendorPassword", "value": "" },
+    { "key": "vendorToken", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Liveness",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/healthz" }
+        },
+        {
+          "name": "Readiness",
+          "request": { "auth": { "type": "noauth" }, "method": "GET", "url": "{{baseUrl}}/readyz" }
+        }
+      ]
+    },
+    {
+      "name": "Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.collectionVariables.set('token', pm.response.json().access_token);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/auth/login",
+        "body": { "mode": "raw", "raw": "{\"username\":\"{{username}}\",\"password\":\"{{password}}\"}" }
+      }
+    },
+    {
+      "name": "Me",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/me" }
+    },
+    {
+      "name": "List providers",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/providers" }
+    },
+    {
+      "name": "Search by name",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "const data = pm.response.json().data;",
+              "if (data.length) pm.collectionVariables.set('userId', data[0].user_id);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users?name=ada",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "users"],
+          "query": [{ "key": "name", "value": "ada" }]
+        }
+      }
+    },
+    {
+      "name": "Search by phone",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users?phone=%2B14165550101",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "users"],
+          "query": [{ "key": "phone", "value": "%2B14165550101" }]
+        }
+      }
+    },
+    {
+      "name": "Search by username",
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/users?username=grace&limit=20&offset=0",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "v1", "users"],
+          "query": [
+            { "key": "username", "value": "grace" },
+            { "key": "limit", "value": "20" },
+            { "key": "offset", "value": "0" }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Get user",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/v1/users/{{userId}}" }
+    },
+    {
+      "name": "Enrich (all providers)",
+      "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/users/{{userId}}/enrich?provider=all" }
+    },
+    {
+      "name": "Enrich (XYC only)",
+      "request": { "method": "POST", "url": "{{baseUrl}}/api/v1/users/{{userId}}/enrich?provider=xyc" }
+    },
+    {
+      "name": "Create user",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{baseUrl}}/api/v1/users",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"name\": \"Jane Doe\",\n  \"phone\": \"+1 416 555 0199\",\n  \"username\": \"jane\",\n  \"password\": \"a-strong-password-1\",\n  \"address\": {\n    \"street_address\": \"1 Main St\",\n    \"locality\": \"Toronto\",\n    \"region\": \"ON\",\n    \"postal_code\": \"M5V 1A1\",\n    \"country\": \"CA\"\n  }\n}"
+        }
+      }
+    },
+    {
+      "name": "Mock vendors",
+      "auth": { "type": "noauth" },
+      "item": [
+        {
+          "name": "ABC /auth",
+          "event": [
+            {
+              "listen": "test",
+              "script": { "exec": ["pm.collectionVariables.set('vendorToken', pm.response.json().access_token);"] }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{abcUrl}}/auth",
+            "body": { "mode": "raw", "raw": "{\"username\":\"{{vendorUsername}}\",\"password\":\"{{vendorPassword}}\"}" }
+          }
+        },
+        {
+          "name": "ABC /identity",
+          "request": {
+            "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{vendorToken}}", "type": "string" }] },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{abcUrl}}/identity",
+            "body": { "mode": "raw", "raw": "{\"phone\":\"+14165550101\",\"name\":\"Ada Lovelace\"}" }
+          }
+        }
+      ]
+    }
+  ]
+}

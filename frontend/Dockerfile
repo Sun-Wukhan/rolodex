@@ -8,6 +8,15 @@ COPY . .
 # The browser calls the API directly, so the public API URL is baked in at build time.
 ARG VITE_API_URL=http://localhost:8080
 ENV VITE_API_URL=$VITE_API_URL
+# Public Firebase web-app identifiers; leave empty to hide Google sign-in.
+ARG VITE_FIREBASE_API_KEY= \
+    VITE_FIREBASE_AUTH_DOMAIN= \
+    VITE_FIREBASE_PROJECT_ID= \
+    VITE_FIREBASE_APP_ID=
+ENV VITE_FIREBASE_API_KEY=$VITE_FIREBASE_API_KEY \
+    VITE_FIREBASE_AUTH_DOMAIN=$VITE_FIREBASE_AUTH_DOMAIN \
+    VITE_FIREBASE_PROJECT_ID=$VITE_FIREBASE_PROJECT_ID \
+    VITE_FIREBASE_APP_ID=$VITE_FIREBASE_APP_ID
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.30-alpine

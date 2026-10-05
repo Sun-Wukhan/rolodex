@@ -75,6 +75,13 @@ spec:
               valueFrom: { secretKeyRef: { name: rolodex-env, key: XYC_USERNAME } }
             - name: XYC_PASSWORD
               valueFrom: { secretKeyRef: { name: rolodex-env, key: XYC_PASSWORD } }
+            # Google sign-in; absent keys leave it disabled.
+            - name: FIREBASE_PROJECT_ID
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: FIREBASE_PROJECT_ID, optional: true } }
+            - name: FIREBASE_ALLOWED_EMAILS
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: FIREBASE_ALLOWED_EMAILS, optional: true } }
+            - name: FIREBASE_ALLOWED_DOMAINS
+              valueFrom: { secretKeyRef: { name: rolodex-env, key: FIREBASE_ALLOWED_DOMAINS, optional: true } }
           readinessProbe:
             httpGet: { path: /readyz, port: http }
             periodSeconds: 5

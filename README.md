@@ -94,6 +94,24 @@ only creates missing users, so changing `SEED_PASSWORD` later does not change ex
 accounts; reset the data (`make down`, `make k8s-down`, or delete the `*.db` files) and
 start again to apply a new one.
 
+#### Sign in with Google (optional)
+
+The login page can also offer **Sign in with Google** through Firebase Authentication.
+It is off unless configured; fill in the Firebase block in `.env` (see `.env.example`):
+
+- `FIREBASE_PROJECT_ID` plus `FIREBASE_ALLOWED_EMAILS` and/or `FIREBASE_ALLOWED_DOMAINS`
+  for the API. Only verified Google emails on the allowlist get in; the first sign-in
+  creates a Rolodex user linked to that email (an `oauth` credential, no password).
+  `FIREBASE_ALLOWED_DOMAINS=*` admits any verified Google account, which gives anyone
+  with one full API access, including vendor enrichment calls.
+- `VITE_FIREBASE_*` (the public web-app config) for the UI, baked in at build time.
+
+The browser exchanges the Firebase ID token at `POST /api/v1/auth/firebase` for the usual
+Rolodex JWT, then signs out of Firebase, so nothing is persisted in the browser. The API
+checks the token against Google's published keys using only the project ID. The site's
+origin (`localhost` is allowed by default) must be listed under *Authentication >
+Settings > Authorized domains* in the Firebase console.
+
 Demo flow in the UI: sign in as `admin`, search by name for "a", open a profile and
 click **Check all**. Grace gets her missing street and postal code from ABC; Katherine
 is verified by both vendors except for ABC's stale street address; Alan is unknown to
@@ -274,6 +292,7 @@ Run Go commands from `backend/` (or `go -C backend ...`) and npm commands from
 | Method | Path                          | Auth | Purpose                                            |
 | ------ | ----------------------------- | ---- | -------------------------------------------------- |
 | POST   | `/api/v1/auth/login`          | -    | Username + password -> access token (rate limited) |
+| POST   | `/api/v1/auth/firebase`       | -    | Firebase ID token -> access token (when enabled)   |
 | GET    | `/api/v1/me`                  | JWT  | Caller identity                                    |
 | GET    | `/api/v1/users`               | JWT  | Search by `name`, `phone`, `username` (AND)        |
 | POST   | `/api/v1/users`               | JWT  | Create user + profile + password credential        |

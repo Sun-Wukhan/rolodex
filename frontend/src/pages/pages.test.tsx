@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import type { UserDetails } from '../api/types';
+import { SignInCancelledError } from '../auth/google-sign-in';
 import { mockApi, renderWithProviders } from '../test/render';
 import { CreateUserPage } from './create-user-page';
 import { LoginPage } from './login-page';
@@ -83,6 +84,70 @@ describe('LoginPage', () => {
       path: '/login',
     });
     expect(screen.getByRole('status')).toHaveTextContent('Demo mode');
+  });
+
+  const google = { name: 'Sign in with Google' };
+
+  it('hides Google sign-in unless it is configured', () => {
+    renderWithProviders(<LoginPage />, {
+      auth: { session: null },
+      route: '/login',
+      path: '/login',
+    });
+    expect(screen.queryByRole('button', google)).not.toBeInTheDocument();
+  });
+
+  it('signs in with Google and navigates away', async () => {
+    const loginWithGoogle = vi.fn().mockResolvedValue(undefined);
+    renderWithProviders(<LoginPage />, {
+      auth: { session: null, googleEnabled: true, loginWithGoogle },
+      route: '/login',
+      path: '/login',
+    });
+
+    await userEvent.click(screen.getByRole('button', google));
+
+    expect(loginWithGoogle).toHaveBeenCalledOnce();
+    expect(await screen.findByText('navigated')).toBeInTheDocument();
+  });
+
+  it('stays quiet when the Google popup is cancelled', async () => {
+    const loginWithGoogle = vi.fn().mockRejectedValue(new SignInCancelledError());
+    renderWithProviders(<LoginPage />, {
+      auth: { session: null, googleEnabled: true, loginWithGoogle },
+      route: '/login',
+      path: '/login',
+    });
+
+    await userEvent.click(screen.getByRole('button', google));
+
+    await waitFor(() => expect(screen.getByRole('button', google)).toBeEnabled());
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    [
+      'an account outside the allowlist',
+      new ApiError(403, {
+        error: { code: 'forbidden', message: 'this account is not allowed to sign in' },
+      }),
+      'this account is not allowed to sign in',
+    ],
+    [
+      'a blocked popup',
+      Object.assign(new Error('blocked'), { code: 'auth/popup-blocked' }),
+      'Allow pop-ups',
+    ],
+  ])('explains %s', async (_case, err, message) => {
+    renderWithProviders(<LoginPage />, {
+      auth: { session: null, googleEnabled: true, loginWithGoogle: vi.fn().mockRejectedValue(err) },
+      route: '/login',
+      path: '/login',
+    });
+
+    await userEvent.click(screen.getByRole('button', google));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(message);
   });
 });
 
