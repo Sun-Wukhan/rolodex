@@ -21,7 +21,8 @@ flowchart LR
   repository --> domain
   provider --> domain
   service --> domain
-  postgres --> repository_contract["repository (contract)"]
+  split --> repository_contract["repository (contracts)"]
+  postgres --> repository_contract
   sqlite --> repository_contract
   abc --> provider_client["provider.Client"]
   xyc --> provider_client
@@ -33,7 +34,7 @@ flowchart LR
 - `httpapi` depends on small consumer-defined interfaces (`Authenticator`,
   `ProfileManager`, `Enricher`), so handlers contain no business logic and can be
   tested in isolation.
-- `cmd/api/main.go` is the only place that knows about concrete implementations.
+- `backend/cmd/api/main.go` is the only place that knows about concrete implementations.
 
 ## 3. Data model
 
@@ -58,7 +59,7 @@ erDiagram
   }
   user_credentials {
     uuid id PK
-    uuid user_id FK
+    uuid user_id "refs users.id (other database)"
     text method
     text username
     text secret_hash
@@ -69,13 +70,20 @@ erDiagram
 
 - `users` is a thin aggregate root, so profile and credentials can evolve, be secured
   and be retained independently.
+- `users` and `user_profiles` live in the **profiles database**; `user_credentials`
+  lives in a separate **credentials database** with its own server and account. Each
+  driver implements two small stores (`ProfileStore`, `CredentialStore`) and the
+  `split` package composes them into the `UserRepository` the services use, so the
+  service layer did not change. Cross-database writes are ordered and compensated
+  (credential first, then profile, delete the credential if the profile fails), and
+  username search becomes "IDs from credentials, then profiles by ID".
 - `UNIQUE(method, username)` lets the same identifier exist for different methods
   (e.g. a password username and an OAuth subject) while preventing duplicates within a
   method. Usernames are lower-cased on write.
 - Address columns are `NOT NULL DEFAULT ''` rather than nullable to keep scanning
   simple and treat "unknown" uniformly. Country is ISO 3166-1 alpha-2.
-- Migrations are embedded per dialect and applied at startup with goose's provider API
-  (no global state). In production, migrations would run as a separate release step.
+- Migrations are embedded per dialect and per database, each with its own goose
+  version table, and applied at startup with goose's provider API (no global state). In production, migrations would run as a separate release step.
 
 ## 4. Authentication flow
 
@@ -183,3 +191,40 @@ flowchart LR
   to obtain and are refreshed proactively.
 - Search would move to trigram indexes or a search engine if substring matching over
   large datasets became a requirement.
+
+### Read/write split for profiles
+
+Profile traffic is read-heavy (search, profile views), so the profiles database runs
+as a primary plus a read-only **streaming replica** (hot standby). This is CQRS at
+the storage level: commands go to the primary, queries go to the replica; the model
+and SQL are shared because both sides have the same schema.
+
+```mermaid
+flowchart LR
+  api[API] -- "CreateUser / DeleteUser" --> primary[(postgres<br/>primary)]
+  api -- "GetProfile / SearchProfiles" --> replica[(postgres-replica<br/>hot standby)]
+  primary -- "WAL streaming (async)" --> replica
+  api -- "credentials (reads + writes)" --> creds[(credentials-db)]
+```
+
+- The routing lives in `internal/repository/replica`, a `ProfileStore` that wraps a
+  primary and a replica store. It is enabled by setting `DATABASE_READ_URL`; when
+  unset, everything uses the primary as before. Services and handlers are unchanged.
+- Replication is asynchronous, so the replica can lag by a few milliseconds.
+  `GetProfile` retries a miss on the primary, which gives read-your-writes for the
+  "create a user, then open the profile" flow. A search may briefly miss a user created
+  a moment ago; that is the accepted trade-off.
+- If the replica is down or not yet bootstrapped, reads fall back to the primary and
+  a warning is logged. `/readyz` only checks the primary, so a lost replica degrades
+  capacity rather than availability. The replica connection is lazy, so the API also
+  starts without it.
+- The replica bootstraps itself with `pg_basebackup` from the primary on first start
+  and follows it over a dedicated `REPLICATION_USER` account
+  ([`deploy/k8s/postgres`](../deploy/k8s/postgres)). The primary keeps 256 MB of WAL
+  (`wal_keep_size`) so a briefly offline replica can catch up without a re-clone.
+  A replication slot would guarantee that, at the risk of filling the primary's disk
+  if the replica disappears.
+- The credentials database stays on a single primary: login has to see a password
+  change immediately, and its load is small.
+- More replicas can be added behind the `postgres-replica` Service. In production a
+  managed service (Cloud SQL read replicas) would replace the hand-rolled standby.

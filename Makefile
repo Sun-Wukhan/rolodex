@@ -2,7 +2,11 @@
 SHELL := /bin/bash
 
 TEST_DATABASE_URL ?= postgres://postgres:test@localhost:55432/rolodex_test?sslmode=disable
-GO_DIRS := cmd internal migrations
+# The Go module lives in backend/ and the React app in frontend/. Go commands
+# run inside backend/, so relative paths (SQLite files, coverage) land there.
+BACKEND := backend
+FRONTEND := frontend
+GO := go -C $(BACKEND)
 COVERAGE_MIN ?= 80
 K8S_NS := rolodex
 # A dedicated minikube profile (and kube context) keeps this project isolated
@@ -16,8 +20,13 @@ GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1
 TRIVY_IMAGE ?= aquasec/trivy:0.75.0
 # Seeded account password for post-deploy tests, read from .env.
 SEED_PASSWORD = $$(sed -n 's/^SEED_PASSWORD=//p' .env)
+# $(call dotenv,NAME) expands to NAME's value in .env (empty if unset).
+dotenv = $$(sed -n 's/^$(1)=//p' .env)
+FIREBASE_WEB_VARS := VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_APP_ID
+# Local runs keep profiles and credentials in two separate SQLite files.
+SQLITE_DBS := DATABASE_URL=rolodex.db CREDENTIALS_DATABASE_URL=rolodex-credentials.db
 
-.PHONY: help env dev run-mock seed-local run-api web up down logs \
+.PHONY: help env login-info dev run-mock seed-local run-api web up down logs \
 	k8s-up k8s-images k8s-secret k8s-apply k8s-forward k8s-status k8s-logs k8s-down \
 	test pg-up pg-down test-pg cover lint vuln fmt ci web-test \
 	sast smoke e2e dast
@@ -30,6 +39,11 @@ help: ## Show available targets
 env: ## Create .env from .env.example if missing
 	@test -f .env || (cp .env.example .env && echo "Created .env - edit the change-me values")
 
+login-info: env ## Print the demo accounts you can sign in with
+	@echo "Usernames: admin, ada, grace, alan, katherine"
+	@echo "Password:  $(SEED_PASSWORD)   (SEED_PASSWORD in .env, shared by all demo accounts)"
+	@echo "GitHub Pages demo: any of those usernames with any password of 12+ characters"
+
 ##@ Run locally without Docker (SQLite)
 
 dev: env ## Run mock vendors, seed, API and web dev server together (Ctrl-C stops all)
@@ -37,23 +51,23 @@ dev: env ## Run mock vendors, seed, API and web dev server together (Ctrl-C stop
 
 run-mock: ## Run only the mock vendors (reads .env)
 	set -a; source .env; set +a; MOCK_ABC_USERNAME=$$ABC_USERNAME MOCK_ABC_PASSWORD=$$ABC_PASSWORD \
-	MOCK_XYC_USERNAME=$$XYC_USERNAME MOCK_XYC_PASSWORD=$$XYC_PASSWORD go run ./cmd/mockvendors
+	MOCK_XYC_USERNAME=$$XYC_USERNAME MOCK_XYC_PASSWORD=$$XYC_PASSWORD $(GO) run ./cmd/mockvendors
 
-seed-local: ## Seed the local SQLite database
-	set -a; source .env; set +a; DB_DRIVER=sqlite DATABASE_URL=rolodex.db go run ./cmd/seed
+seed-local: ## Seed the local SQLite databases (backend/rolodex.db, backend/rolodex-credentials.db)
+	set -a; source .env; set +a; DB_DRIVER=sqlite $(SQLITE_DBS) $(GO) run ./cmd/seed
 
 run-api: ## Run only the API against SQLite and local mock vendors
-	set -a; source .env; set +a; DB_DRIVER=sqlite DATABASE_URL=rolodex.db \
-	ABC_BASE_URL=http://localhost:9001 XYC_BASE_URL=http://localhost:9002 go run ./cmd/api
+	set -a; source .env; set +a; DB_DRIVER=sqlite $(SQLITE_DBS) \
+	ABC_BASE_URL=http://localhost:9001 XYC_BASE_URL=http://localhost:9002 $(GO) run ./cmd/api
 
 web: ## Run only the frontend dev server (http://localhost:5173)
-	cd web && npm install && npm run dev
+	cd $(FRONTEND) && npm install && npm run dev
 
 ##@ Run with Docker Compose (PostgreSQL)
 
 up: env ## Build and start the full stack
 	docker compose up --build -d
-	@echo "API: http://localhost:8080   Web: http://localhost:3000"
+	@echo "API: http://localhost:8080   Web: http://localhost:3000   ('make login-info' shows the sign-in)"
 
 down: ## Stop the stack and remove volumes
 	docker compose down -v
@@ -67,15 +81,18 @@ k8s-up: env ## Start minikube if needed, build images, deploy everything and wai
 	@$(MINIKUBE) status >/dev/null 2>&1 || $(MINIKUBE) start --cpus=2 --memory=3072
 	$(MAKE) k8s-images k8s-secret k8s-apply
 	$(KUBECTL) rollout status statefulset/postgres --timeout=180s
+	$(KUBECTL) rollout status statefulset/postgres-replica --timeout=180s
+	$(KUBECTL) rollout status statefulset/credentials-db --timeout=180s
 	$(KUBECTL) wait --for=condition=complete job/seed --timeout=180s
 	$(KUBECTL) rollout status deployment/mockvendors --timeout=120s
 	$(KUBECTL) rollout status deployment/api --timeout=180s
 	$(KUBECTL) rollout status deployment/web --timeout=120s
-	@echo "Deployed. Run 'make k8s-forward', then open http://localhost:3000"
+	@echo "Deployed. Run 'make k8s-forward', then open http://localhost:3000 ('make login-info' shows the sign-in)"
 
 k8s-images: ## Build the API and web images inside minikube
-	$(MINIKUBE) image build -t rolodex:local .
-	$(MINIKUBE) image build -t rolodex-web:local --build-opt=build-arg=VITE_API_URL=http://localhost:8080 web
+	$(MINIKUBE) image build -t rolodex:local $(BACKEND)
+	$(MINIKUBE) image build -t rolodex-web:local --build-opt=build-arg=VITE_API_URL=http://localhost:8080 \
+		$(foreach v,$(FIREBASE_WEB_VARS),--build-opt=build-arg=$(v)="$(call dotenv,$(v))") $(FRONTEND)
 
 k8s-secret: ## Create/update the rolodex-env Secret from .env
 	$(KUBECTL) apply -f deploy/k8s/namespace.yaml
@@ -105,7 +122,7 @@ k8s-down: ## Delete the rolodex namespace (data included); `minikube -p rolodex 
 ##@ Quality
 
 test: ## Run unit tests (SQLite contract tests included)
-	go test -race ./...
+	$(GO) test -race ./...
 
 pg-up: ## Start the throwaway PostgreSQL test container (port 55432)
 	@docker inspect rolodex-pgtest >/dev/null 2>&1 || docker run -d --rm --name rolodex-pgtest \
@@ -116,27 +133,27 @@ pg-down: ## Stop the PostgreSQL test container
 	-docker stop rolodex-pgtest >/dev/null
 
 test-pg: pg-up ## Run all tests including PostgreSQL contract tests
-	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -race -count=1 ./...
+	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test -race -count=1 ./...
 
 cover: pg-up ## Run tests (SQLite + PostgreSQL) with coverage; fail below COVERAGE_MIN percent
-	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" go test -race -count=1 -coverpkg=./internal/... -coverprofile=coverage.out ./...
-	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%","",$$3); print $$3}'); \
+	TEST_DATABASE_URL="$(TEST_DATABASE_URL)" $(GO) test -race -count=1 -coverpkg=./internal/... -coverprofile=coverage.out ./...
+	@total=$$($(GO) tool cover -func=coverage.out | awk '/^total:/ {sub("%","",$$3); print $$3}'); \
 	echo "total coverage: $$total% (min $(COVERAGE_MIN)%)"; \
 	awk -v t="$$total" -v m="$(COVERAGE_MIN)" 'BEGIN { exit (t+0 < m+0) }'
 
 lint: ## Run gofmt, go vet and golangci-lint
-	@test -z "$$(gofmt -l $(GO_DIRS))" || (gofmt -l $(GO_DIRS) && exit 1)
-	go vet ./...
-	golangci-lint run
+	@test -z "$$(gofmt -l $(BACKEND))" || (gofmt -l $(BACKEND) && exit 1)
+	$(GO) vet ./...
+	cd $(BACKEND) && golangci-lint run
 
 vuln: ## Scan Go dependencies and stdlib for reachable vulnerabilities
-	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
 fmt: ## Format Go code
-	gofmt -w $(GO_DIRS)
+	gofmt -w $(BACKEND)
 
 web-test: ## Run frontend lint, typecheck and tests with coverage
-	cd web && npm run lint && npm run typecheck && npm run test:coverage
+	cd $(FRONTEND) && npm run lint && npm run typecheck && npm run test:coverage
 
 ci: lint cover vuln web-test ## Run the CI checks locally
 
@@ -150,7 +167,7 @@ sast: ## Static analysis: Semgrep, Gitleaks (git history) and Trivy (deps, IaC, 
 	docker run --rm -v "$$PWD:/repo" -w /repo $(GITLEAKS_IMAGE) git --redact --no-banner .
 	docker run --rm -v "$$PWD:/src" -v rolodex-trivy-cache:/root/.cache -w /src $(TRIVY_IMAGE) fs --quiet \
 		--timeout 15m --scanners vuln,misconfig,secret --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 \
-		--skip-dirs web/node_modules --skip-dirs e2e/node_modules --skip-dirs bin --skip-dirs web/dist \
+		--skip-dirs frontend/node_modules --skip-dirs e2e/node_modules --skip-dirs backend/bin --skip-dirs frontend/dist \
 		--skip-files .env .
 
 smoke: env ## API + web smoke test against localhost:8080/:3000 (make up, or make k8s-forward)

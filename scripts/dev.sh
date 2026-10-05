@@ -31,32 +31,35 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-export DB_DRIVER=sqlite DATABASE_URL="${LOCAL_SQLITE_PATH:-rolodex.db}"
+# Profiles and credentials (password hashes) live in separate database files.
+export DB_DRIVER=sqlite DATABASE_URL="${LOCAL_SQLITE_PATH:-backend/rolodex.db}" \
+  CREDENTIALS_DATABASE_URL="${LOCAL_SQLITE_CREDENTIALS_PATH:-backend/rolodex-credentials.db}"
 
 echo "==> Building Go binaries"
-mkdir -p bin
-go build -o bin/ ./cmd/...
+mkdir -p backend/bin
+go -C backend build -o bin/ ./cmd/...
 
 echo "==> Starting mock vendors on :9001 (ABC) and :9002 (XYC)"
 MOCK_ABC_USERNAME="$ABC_USERNAME" MOCK_ABC_PASSWORD="$ABC_PASSWORD" \
   MOCK_XYC_USERNAME="$XYC_USERNAME" MOCK_XYC_PASSWORD="$XYC_PASSWORD" \
-  ./bin/mockvendors 2>&1 | sed 's/^/[vendors] /' &
+  ./backend/bin/mockvendors 2>&1 | sed 's/^/[vendors] /' &
 pids+=("$!")
 
-echo "==> Seeding $DATABASE_URL"
-./bin/seed 2>&1 | sed 's/^/[seed] /'
+echo "==> Seeding $DATABASE_URL (profiles) and $CREDENTIALS_DATABASE_URL (credentials)"
+./backend/bin/seed 2>&1 | sed 's/^/[seed] /'
 
 echo "==> Starting API on :8080"
 ABC_BASE_URL=http://localhost:9001 XYC_BASE_URL=http://localhost:9002 \
   CORS_ALLOWED_ORIGINS=http://localhost:5173 \
-  ./bin/api 2>&1 | sed 's/^/[api] /' &
+  ./backend/bin/api 2>&1 | sed 's/^/[api] /' &
 pids+=("$!")
 
 echo "==> Starting web on :5173"
-(cd web && { [[ -d node_modules ]] || npm ci; } && VITE_API_URL=http://localhost:8080 npm run dev -- --strictPort) \
+(cd frontend && { [[ -d node_modules ]] || npm ci; } && VITE_API_URL=http://localhost:8080 npm run dev -- --strictPort) \
   2>&1 | sed 's/^/[web] /' &
 pids+=("$!")
 
 echo
-echo "Rolodex is starting: open http://localhost:5173 (sign in as admin / \$SEED_PASSWORD from .env)"
+echo "Rolodex is starting: open http://localhost:5173"
+echo "Sign in as admin (or ada, grace, alan, katherine) with password: $SEED_PASSWORD"
 wait

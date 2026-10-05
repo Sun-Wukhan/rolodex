@@ -11,7 +11,14 @@ labels:
 resources:
   - namespace.yaml
   - postgres.yaml
+  - postgres-replica.yaml
+  - credentials-db.yaml
   - mockvendors.yaml
   - seed-job.yaml
   - api.yaml
   - web.yaml
+configMapGenerator:
+  - name: postgres-replication
+    files:
+      - postgres/pg_hba.conf
+      - postgres/replica-entrypoint.sh

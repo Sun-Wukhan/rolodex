@@ -1,0 +1,278 @@
+openapi: 3.0.3
+info:
+  title: Rolodex API
+  version: 1.0.0
+  description: |
+    Search and retrieve user profiles, and enrich them from third-party identity
+    providers. All `/api/v1` endpoints except login require a bearer JWT.
+servers:
+  - url: http://localhost:8080
+security:
+  - bearerAuth: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness probe
+      security: []
+      responses:
+        "200": { description: Process is alive }
+  /readyz:
+    get:
+      summary: Readiness probe (datastore reachable)
+      security: []
+      responses:
+        "200": { description: Ready }
+        "503": { $ref: "#/components/responses/Error" }
+  /api/v1/auth/login:
+    post:
+      summary: Exchange username and password for an access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              additionalProperties: false
+              properties:
+                username: { type: string }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessToken" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { description: Too many login attempts }
+  /api/v1/auth/firebase:
+    post:
+      summary: Exchange a Firebase ID token (Google sign-in) for an access token
+      description: |
+        Only registered when FIREBASE_PROJECT_ID is set. The token's verified
+        email must match FIREBASE_ALLOWED_EMAILS or FIREBASE_ALLOWED_DOMAINS
+        (`*` admits any verified email); the first sign-in creates a user with an `oauth` credential for that
+        email. Shares the login rate limit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id_token]
+              additionalProperties: false
+              properties:
+                id_token: { type: string, description: Firebase Authentication ID token }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessToken" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { description: Google sign-in is not configured }
+        "429": { description: Too many login attempts }
+  /api/v1/me:
+    get:
+      summary: Current caller
+      responses:
+        "200":
+          description: Caller identity from the token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string, format: uuid }
+                  username: { type: string }
+                  expires_at: { type: string, format: date-time }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/v1/providers:
+    get:
+      summary: List configured identity providers
+      responses:
+        "200":
+          description: Provider names
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  providers: { type: array, items: { type: string } }
+  /api/v1/users:
+    get:
+      summary: Search profiles
+      description: At least one of name, phone or username is required. Filters combine with AND.
+      parameters:
+        - { name: name, in: query, schema: { type: string }, description: Case-insensitive substring }
+        - { name: phone, in: query, schema: { type: string }, description: Normalised to E.164 then matched exactly }
+        - { name: username, in: query, schema: { type: string }, description: Case-insensitive substring over any credential }
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, default: 0 } }
+      responses:
+        "200":
+          description: Matching profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { type: array, items: { $ref: "#/components/schemas/Profile" } }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      summary: Create a user with a profile and password credential
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateUser" }
+      responses:
+        "201":
+          description: Created
+          headers:
+            Location: { schema: { type: string } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /api/v1/users/{id}:
+    get:
+      summary: Get a profile and its credential methods
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: Profile with credential metadata (secrets are never returned)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile: { $ref: "#/components/schemas/Profile" }
+                  credentials: { type: array, items: { $ref: "#/components/schemas/Credential" } }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/v1/users/{id}/enrich:
+    post:
+      summary: Enrich a profile from identity providers
+      description: |
+        Queries the selected providers concurrently. A provider failure is reported in
+        `providers[].status` and never fails the whole request.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: provider
+          in: query
+          description: Comma-separated provider names, or `all` (default)
+          schema: { type: string, example: "abc,xyc" }
+      responses:
+        "200":
+          description: Merged profile with per-field provenance
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrichedProfile" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    AccessToken:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_at: { type: string, format: date-time }
+    Address:
+      type: object
+      properties:
+        street_address: { type: string }
+        locality: { type: string }
+        region: { type: string }
+        postal_code: { type: string }
+        country: { type: string, description: ISO 3166-1 alpha-2 }
+    Profile:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        name: { type: string }
+        phone: { type: string, example: "+14165550123" }
+        address: { $ref: "#/components/schemas/Address" }
+    Credential:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        method: { type: string, enum: [password, oauth, passkey] }
+        username: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    CreateUser:
+      type: object
+      required: [name, phone, username, password]
+      additionalProperties: false
+      properties:
+        name: { type: string, maxLength: 200 }
+        phone: { type: string }
+        address: { $ref: "#/components/schemas/Address" }
+        username: { type: string, pattern: "^[a-z0-9._@-]{3,64}$" }
+        password: { type: string, format: password, minLength: 12, maxLength: 128 }
+    FieldSource:
+      type: object
+      properties:
+        value: { type: string }
+        source: { type: string, description: "local, or the provider that supplied the value" }
+        verified_by: { type: array, items: { type: string } }
+    ProviderResult:
+      type: object
+      properties:
+        provider: { type: string }
+        status: { type: string, enum: [ok, not_found, unavailable, error] }
+        error: { type: string }
+        identity:
+          type: object
+          properties:
+            provider: { type: string }
+            name: { type: string }
+            phone: { type: string }
+            address: { $ref: "#/components/schemas/Address" }
+    EnrichedProfile:
+      type: object
+      properties:
+        user_id: { type: string, format: uuid }
+        fields:
+          type: object
+          additionalProperties: { $ref: "#/components/schemas/FieldSource" }
+        providers: { type: array, items: { $ref: "#/components/schemas/ProviderResult" } }
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            fields: { type: object, additionalProperties: { type: string } }
+            request_id: { type: string }
