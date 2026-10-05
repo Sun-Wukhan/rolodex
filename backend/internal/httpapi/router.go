@@ -13,7 +13,10 @@ import (
 
 // Deps are the collaborators the HTTP layer needs.
 type Deps struct {
-	Auth               Authenticator
+	Auth Authenticator
+	// Firebase enables POST /api/v1/auth/firebase (Google sign-in). Nil
+	// leaves the route unregistered.
+	Firebase           FirebaseAuthenticator
 	Profiles           ProfileManager
 	Identity           Enricher
 	Ready              Pinger
@@ -29,7 +32,7 @@ type Deps struct {
 
 // NewRouter builds the HTTP handler with all routes and middleware.
 func NewRouter(d Deps) http.Handler {
-	h := &handlers{auth: d.Auth, profiles: d.Profiles, identity: d.Identity, ready: d.Ready, log: d.Log}
+	h := &handlers{auth: d.Auth, firebase: d.Firebase, profiles: d.Profiles, identity: d.Identity, ready: d.Ready, log: d.Log}
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -54,7 +57,12 @@ func NewRouter(d Deps) http.Handler {
 	r.Get("/readyz", h.readyz)
 
 	r.Route("/api/v1", func(r chi.Router) {
-		r.With(httprate.LimitBy(d.LoginRatePerMinute, time.Minute, clientIPKey)).Post("/auth/login", h.login)
+		// One limiter instance, so password and Google sign-ins share a budget.
+		loginLimit := httprate.LimitBy(d.LoginRatePerMinute, time.Minute, clientIPKey)
+		r.With(loginLimit).Post("/auth/login", h.login)
+		if d.Firebase != nil {
+			r.With(loginLimit).Post("/auth/firebase", h.firebaseLogin)
+		}
 
 		r.Group(func(r chi.Router) {
 			r.Use(requireAuth(d.Tokens))

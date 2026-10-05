@@ -12,7 +12,11 @@ export interface AuthContextValue {
   api: ApiClient;
   /** True when the UI is backed by the in-browser demo API (static hosting). */
   demo: boolean;
+  /** True when Google sign-in (Firebase) is configured. */
+  googleEnabled: boolean;
   login(username: string, password: string): Promise<void>;
+  /** Signs in through a Google popup. Rejects with SignInCancelledError if the user backs out. */
+  loginWithGoogle(): Promise<void>;
   logout(): void;
 }
 

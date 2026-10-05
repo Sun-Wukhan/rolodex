@@ -20,6 +20,9 @@ GITLEAKS_IMAGE ?= zricethezav/gitleaks:v8.30.1
 TRIVY_IMAGE ?= aquasec/trivy:0.75.0
 # Seeded account password for post-deploy tests, read from .env.
 SEED_PASSWORD = $$(sed -n 's/^SEED_PASSWORD=//p' .env)
+# $(call dotenv,NAME) expands to NAME's value in .env (empty if unset).
+dotenv = $$(sed -n 's/^$(1)=//p' .env)
+FIREBASE_WEB_VARS := VITE_FIREBASE_API_KEY VITE_FIREBASE_AUTH_DOMAIN VITE_FIREBASE_PROJECT_ID VITE_FIREBASE_APP_ID
 # Local runs keep profiles and credentials in two separate SQLite files.
 SQLITE_DBS := DATABASE_URL=rolodex.db CREDENTIALS_DATABASE_URL=rolodex-credentials.db
 
@@ -78,6 +81,7 @@ k8s-up: env ## Start minikube if needed, build images, deploy everything and wai
 	@$(MINIKUBE) status >/dev/null 2>&1 || $(MINIKUBE) start --cpus=2 --memory=3072
 	$(MAKE) k8s-images k8s-secret k8s-apply
 	$(KUBECTL) rollout status statefulset/postgres --timeout=180s
+	$(KUBECTL) rollout status statefulset/postgres-replica --timeout=180s
 	$(KUBECTL) rollout status statefulset/credentials-db --timeout=180s
 	$(KUBECTL) wait --for=condition=complete job/seed --timeout=180s
 	$(KUBECTL) rollout status deployment/mockvendors --timeout=120s
@@ -87,7 +91,8 @@ k8s-up: env ## Start minikube if needed, build images, deploy everything and wai
 
 k8s-images: ## Build the API and web images inside minikube
 	$(MINIKUBE) image build -t rolodex:local $(BACKEND)
-	$(MINIKUBE) image build -t rolodex-web:local --build-opt=build-arg=VITE_API_URL=http://localhost:8080 $(FRONTEND)
+	$(MINIKUBE) image build -t rolodex-web:local --build-opt=build-arg=VITE_API_URL=http://localhost:8080 \
+		$(foreach v,$(FIREBASE_WEB_VARS),--build-opt=build-arg=$(v)="$(call dotenv,$(v))") $(FRONTEND)
 
 k8s-secret: ## Create/update the rolodex-env Secret from .env
 	$(KUBECTL) apply -f deploy/k8s/namespace.yaml

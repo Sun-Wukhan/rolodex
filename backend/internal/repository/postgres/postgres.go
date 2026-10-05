@@ -22,20 +22,37 @@ import (
 
 const uniqueViolation = "23505"
 
-// openDB connects to PostgreSQL, configures the connection pool and applies
-// the migrations of schema.
-func openDB(ctx context.Context, dsn string, schema migrations.Schema) (*sql.DB, error) {
+// pool opens a connection pool without connecting; label names the database
+// in errors.
+func pool(dsn, label string) (*sql.DB, error) {
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		return nil, fmt.Errorf("postgres %s: open: %w", schema, err)
+		return nil, fmt.Errorf("postgres %s: open: %w", label, err)
 	}
 	db.SetMaxOpenConns(20)
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(30 * time.Minute)
+	return db, nil
+}
 
+// connect opens a pool and verifies the server is reachable.
+func connect(ctx context.Context, dsn, label string) (*sql.DB, error) {
+	db, err := pool(dsn, label)
+	if err != nil {
+		return nil, err
+	}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("postgres %s: ping: %w", schema, err)
+		return nil, fmt.Errorf("postgres %s: ping: %w", label, err)
+	}
+	return db, nil
+}
+
+// openDB connects to a primary and applies the migrations of schema.
+func openDB(ctx context.Context, dsn string, schema migrations.Schema) (*sql.DB, error) {
+	db, err := connect(ctx, dsn, string(schema))
+	if err != nil {
+		return nil, err
 	}
 	if err := migrations.Up(ctx, db, "postgres", schema); err != nil {
 		_ = db.Close()

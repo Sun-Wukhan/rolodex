@@ -30,6 +30,20 @@ func (stubProvider) Lookup(context.Context, domain.IdentityQuery) (*domain.Ident
 	return &domain.Identity{Provider: "abc", Name: "Ada Lovelace", Address: domain.Address{PostalCode: "M5V 2T6"}}, nil
 }
 
+// stubVerifier accepts two fixed Firebase ID tokens: one for an allowlisted
+// Google account and one for an outsider.
+type stubVerifier struct{}
+
+func (stubVerifier) Verify(_ context.Context, token string) (security.FirebaseIdentity, error) {
+	switch token {
+	case "google-grace":
+		return security.FirebaseIdentity{UID: "g1", Email: "Grace@Navy.mil", EmailVerified: true, Name: "Grace Hopper"}, nil
+	case "google-outsider":
+		return security.FirebaseIdentity{UID: "g2", Email: "eve@example.com", EmailVerified: true}, nil
+	}
+	return security.FirebaseIdentity{}, security.ErrInvalidToken
+}
+
 type downPinger struct{}
 
 func (downPinger) Ping(context.Context) error { return errors.New("down") }
@@ -55,6 +69,7 @@ func setup(t *testing.T, ready httpapi.Pinger) *env {
 	auth, _ := service.NewAuthService(repo, hasher, tokens, log)
 	profiles := service.NewProfileService(repo, hasher)
 	identity := service.NewIdentityService(repo, []provider.IdentityProvider{stubProvider{}}, time.Second, log)
+	firebase := service.NewFirebaseAuthService(repo, stubVerifier{}, service.NewEmailAllowlist(nil, []string{"navy.mil"}), tokens, log)
 
 	u, err := profiles.CreateUser(ctx, service.CreateUserInput{
 		Name: "Ada Lovelace", Phone: "4165550100", Username: "ada", Password: "correct-horse-battery",
@@ -66,7 +81,7 @@ func setup(t *testing.T, ready httpapi.Pinger) *env {
 		ready = repo
 	}
 	h := httpapi.NewRouter(httpapi.Deps{
-		Auth: auth, Profiles: profiles, Identity: identity, Ready: ready, Tokens: tokens, Log: log,
+		Auth: auth, Firebase: firebase, Profiles: profiles, Identity: identity, Ready: ready, Tokens: tokens, Log: log,
 		CORSAllowedOrigins: []string{"http://localhost:5173"}, LoginRatePerMinute: 5,
 	})
 	srv := httptest.NewServer(h)
@@ -187,6 +202,52 @@ func TestAuthFailures(t *testing.T) {
 	resp, body := e.do(t, http.MethodPost, "/api/v1/auth/login", "", map[string]string{"username": "ada", "password": "nope"})
 	if resp.StatusCode != http.StatusUnauthorized || body["error"].(map[string]any)["request_id"] == "" {
 		t.Fatalf("bad password: %d %v", resp.StatusCode, body)
+	}
+}
+
+func TestFirebaseLogin(t *testing.T) {
+	e := setup(t, nil)
+	login := func(token string) (*http.Response, map[string]any) {
+		return e.do(t, http.MethodPost, "/api/v1/auth/firebase", "", map[string]string{"id_token": token})
+	}
+
+	resp, body := login("google-grace")
+	if resp.StatusCode != http.StatusOK || body["token_type"] != "Bearer" {
+		t.Fatalf("firebase login: %d %v", resp.StatusCode, body)
+	}
+	tok := body["access_token"].(string)
+	resp, body = e.do(t, http.MethodGet, "/api/v1/me", tok, nil)
+	if resp.StatusCode != http.StatusOK || body["username"] != "grace@navy.mil" {
+		t.Fatalf("me after firebase login: %d %v", resp.StatusCode, body)
+	}
+	resp, body = e.do(t, http.MethodGet, "/api/v1/users?username=grace@navy.mil", tok, nil)
+	if resp.StatusCode != http.StatusOK || len(body["data"].([]any)) != 1 {
+		t.Fatalf("provisioned user not searchable: %d %v", resp.StatusCode, body)
+	}
+
+	for token, want := range map[string]int{
+		"google-outsider": http.StatusForbidden,
+		"forged":          http.StatusUnauthorized,
+		"":                http.StatusUnauthorized,
+	} {
+		if resp, body := login(token); resp.StatusCode != want {
+			t.Errorf("token %q: got %d want %d (%v)", token, resp.StatusCode, want, body)
+		}
+	}
+	resp, _ = e.do(t, http.MethodPost, "/api/v1/auth/firebase", "", map[string]string{"id_token": "x", "uid": "admin"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("unknown fields must be rejected, got %d", resp.StatusCode)
+	}
+
+	disabled := httptest.NewServer(httpapi.NewRouter(httpapi.Deps{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), LoginRatePerMinute: 5}))
+	t.Cleanup(disabled.Close)
+	r, err := http.Post(disabled.URL+"/api/v1/auth/firebase", "application/json", strings.NewReader(`{"id_token":"google-grace"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Body.Close()
+	if r.StatusCode != http.StatusNotFound {
+		t.Fatalf("route must not exist without Firebase config, got %d", r.StatusCode)
 	}
 }
 

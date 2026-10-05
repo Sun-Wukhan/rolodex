@@ -11,7 +11,7 @@ test.describe('authentication', () => {
     await page.goto('login');
     await page.getByLabel('Username').fill(credentials.username);
     await page.getByLabel('Password').fill(randomId());
-    await page.getByRole('button', { name: 'Sign in' }).click();
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
     await expect(page.getByRole('alert')).toBeVisible();
     await expect(page).toHaveURL(/\/login$/);
   });

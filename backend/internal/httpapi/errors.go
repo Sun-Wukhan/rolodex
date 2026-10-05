@@ -52,6 +52,8 @@ func handleError(w http.ResponseWriter, r *http.Request, log *slog.Logger, err e
 		writeError(w, r, http.StatusConflict, "conflict", "resource already exists", nil)
 	case errors.Is(err, domain.ErrUnauthorized):
 		writeError(w, r, http.StatusUnauthorized, "unauthorized", "invalid credentials", nil)
+	case errors.Is(err, domain.ErrForbidden):
+		writeError(w, r, http.StatusForbidden, "forbidden", "this account is not allowed to sign in", nil)
 	default:
 		log.ErrorContext(r.Context(), "unhandled error", "error", err, "request_id", middleware.GetReqID(r.Context()))
 		writeError(w, r, http.StatusInternalServerError, "internal", "internal server error", nil)

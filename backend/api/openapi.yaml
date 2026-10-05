@@ -47,6 +47,36 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "429": { description: Too many login attempts }
+  /api/v1/auth/firebase:
+    post:
+      summary: Exchange a Firebase ID token (Google sign-in) for an access token
+      description: |
+        Only registered when FIREBASE_PROJECT_ID is set. The token's verified
+        email must match FIREBASE_ALLOWED_EMAILS or FIREBASE_ALLOWED_DOMAINS
+        (`*` admits any verified email); the first sign-in creates a user with an `oauth` credential for that
+        email. Shares the login rate limit.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id_token]
+              additionalProperties: false
+              properties:
+                id_token: { type: string, description: Firebase Authentication ID token }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AccessToken" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { description: Google sign-in is not configured }
+        "429": { description: Too many login attempts }
   /api/v1/me:
     get:
       summary: Current caller

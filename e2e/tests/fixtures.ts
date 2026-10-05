@@ -33,7 +33,7 @@ export async function signIn(page: Page, { username, password }: Credentials): P
   await expect(page).toHaveURL(/\/login$/);
   await page.getByLabel('Username').fill(username);
   await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page.getByText(`Signed in as ${username}`)).toBeVisible();
 }
 
